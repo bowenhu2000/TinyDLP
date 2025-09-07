@@ -1,4 +1,4 @@
-#include "DLLInjector.h"
+﻿#include "DLLInjector.h"
 #include "Logger.h"
 #include <algorithm>
 
@@ -12,7 +12,7 @@ std::thread g_processMonitorThread;
 bool DLLInjector::Initialize() {
     std::lock_guard<std::mutex> lock(injectorMutex);
     
-    // Get the path to our hook DLL
+    // Get the path to our hook DLL - look in the correct location
     wchar_t currentPath[MAX_PATH];
     GetModuleFileNameW(NULL, currentPath, MAX_PATH);
     std::wstring exePath(currentPath);
@@ -21,7 +21,24 @@ bool DLLInjector::Initialize() {
     size_t lastSlash = exePath.find_last_of(L"\\/");
     if (lastSlash != std::wstring::npos) {
         std::wstring exeDir = exePath.substr(0, lastSlash);
-        hookDllPath = exeDir + L"\\TinyDLP_Hook.dll";
+        // Try multiple possible locations for the DLL
+        std::vector<std::wstring> possiblePaths = {
+            exeDir + L"\\TinyDLP_Hook\\x64\\Debug\\TinyDLP_Hook.dll",
+            exeDir + L"\\TinyDLP_Hook\\x64\\Release\\TinyDLP_Hook.dll",
+            exeDir + L"\\TinyDLP_Hook\\TinyDLP_Hook.dll",
+            exeDir + L"\\TinyDLP_Hook.dll"
+        };
+        
+        for (const auto& path : possiblePaths) {
+            if (GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES) {
+                hookDllPath = path;
+                break;
+            }
+        }
+        
+        if (hookDllPath.empty()) {
+            hookDllPath = exeDir + L"\\TinyDLP_Hook\\x64\\Debug\\TinyDLP_Hook.dll"; // Default path
+        }
     } else {
         hookDllPath = L"TinyDLP_Hook.dll";
     }
@@ -29,6 +46,7 @@ bool DLLInjector::Initialize() {
     // Check if the DLL exists
     if (GetFileAttributesW(hookDllPath.c_str()) == INVALID_FILE_ATTRIBUTES) {
         Logger::Log(LOG_ERROR, L"Hook DLL not found: " + hookDllPath);
+        Logger::Log(LOG_ERROR, L"Please build the TinyDLP_Hook project first");
         return false;
     }
     
@@ -62,6 +80,10 @@ void DLLInjector::StartProcessMonitoring() {
     try {
         g_processMonitorThread = std::thread(ProcessMonitorThread);
         Logger::Log(LOG_INFO, L"Process monitoring started");
+        
+        // Immediately inject into existing target processes
+        InjectIntoExistingProcesses();
+        
     } catch (const std::exception&) {
         isMonitoring = false;
         Logger::Log(LOG_ERROR, L"Failed to start process monitoring thread");
@@ -84,6 +106,25 @@ void DLLInjector::StopProcessMonitoring() {
     Logger::Log(LOG_INFO, L"Process monitoring stopped");
 }
 
+void DLLInjector::InjectIntoExistingProcesses() {
+    Logger::Log(LOG_INFO, L"Injecting into existing target processes...");
+    
+    std::vector<DWORD> currentProcesses = GetRunningProcesses();
+    int injectedCount = 0;
+    
+    for (DWORD processId : currentProcesses) {
+        std::wstring processName = GetProcessName(processId);
+        if (ShouldInjectProcess(processName)) {
+            Logger::Log(LOG_INFO, L"Injecting to " + processName);
+            if (InjectDLL(processId)) {
+                injectedCount++;
+            }
+        }
+    }
+    
+    Logger::Log(LOG_INFO, L"Injected into " + std::to_wstring(injectedCount) + L" existing processes");
+}
+
 void DLLInjector::ProcessMonitorThread() {
     Logger::Log(LOG_INFO, L"Process monitor thread started");
     
@@ -102,20 +143,43 @@ void DLLInjector::ProcessMonitorThread() {
         // Get current process list
         currentProcesses = GetRunningProcesses();
         
-        // Find new processes
-        for (DWORD processId : currentProcesses) {
-            if (std::find(previousProcesses.begin(), previousProcesses.end(), processId) == previousProcesses.end()) {
+        // Find new processes - use index-based loop to avoid iterator issues
+        for (size_t i = 0; i < currentProcesses.size(); ++i) {
+            DWORD processId = currentProcesses[i];
+            bool found = false;
+            
+            // Check if this process was in the previous list
+            for (size_t j = 0; j < previousProcesses.size(); ++j) {
+                if (previousProcesses[j] == processId) {
+                    found = true;
+                    break;
+                }
+            }
+            
+            if (!found) {
                 OnProcessCreated(processId);
             }
         }
         
-        // Find terminated processes
-        for (DWORD processId : previousProcesses) {
-            if (std::find(currentProcesses.begin(), currentProcesses.end(), processId) == currentProcesses.end()) {
+        // Find terminated processes - use index-based loop to avoid iterator issues
+        for (size_t i = 0; i < previousProcesses.size(); ++i) {
+            DWORD processId = previousProcesses[i];
+            bool found = false;
+            
+            // Check if this process is still in the current list
+            for (size_t j = 0; j < currentProcesses.size(); ++j) {
+                if (currentProcesses[j] == processId) {
+                    found = true;
+                    break;
+                }
+            }
+            
+            if (!found) {
                 OnProcessTerminated(processId);
             }
         }
         
+        // Copy current to previous for next iteration
         previousProcesses = currentProcesses;
         
         // Sleep for a bit before checking again
@@ -126,7 +190,7 @@ void DLLInjector::ProcessMonitorThread() {
 }
 
 bool DLLInjector::InjectDLL(DWORD processId) {
-    std::lock_guard<std::mutex> lock(injectorMutex);
+    //std::lock_guard<std::mutex> lock(injectorMutex);
     
     if (IsProcessInjected(processId)) {
         return true; // Already injected
@@ -145,7 +209,7 @@ bool DLLInjector::InjectDLL(DWORD processId) {
         Logger::Log(LOG_INFO, L"=== DLL Injection Successful ===");
         Logger::Log(LOG_INFO, L"Target Process: " + processName);
         Logger::Log(LOG_INFO, L"Process ID: " + std::to_wstring(processId));
-        Logger::Log(LOG_INFO, L"DLL Path: C:\\Users\\BowenGit\\Documents\\GitHub\\TinyDLP\\x64\\Release\\TinyDLP_Hook.dll");
+        Logger::Log(LOG_INFO, L"DLL Path: " + hookDllPath);
         Logger::Log(LOG_INFO, L"Process is now protected against PDF saves to USB drives");
         return true;
     } else {
@@ -165,7 +229,7 @@ void DLLInjector::UninjectDLL(DWORD processId) {
 }
 
 bool DLLInjector::IsProcessInjected(DWORD processId) {
-//    std::lock_guard<std::mutex> lock(injectorMutex);
+    //std::lock_guard<std::mutex> lock(injectorMutex);
     return std::find(injectedProcesses.begin(), injectedProcesses.end(), processId) != injectedProcesses.end();
 }
 
@@ -217,21 +281,19 @@ std::wstring DLLInjector::GetProcessName(DWORD processId) {
 bool DLLInjector::ShouldInjectProcess(const std::wstring& processName) {
     // List of processes that might save PDF files
     std::vector<std::wstring> targetProcesses = {
-        //L"winword.exe",      // Microsoft Word
-        //L"excel.exe",        // Microsoft Excel
-        //L"powerpnt.exe",     // Microsoft PowerPoint
-        //L"acrord32.exe",     // Adobe Acrobat Reader
-        //L"acrobat.exe",      // Adobe Acrobat
-        L"chrome.exe",       // Google Chrome
-        //L"firefox.exe",      // Mozilla Firefox
-        //L"msedge.exe",       // Microsoft Edge
-        //L"notepad.exe",      // Notepad
-        //L"notepad++.exe",    // Notepad++
-        //L"code.exe",         // Visual Studio Code
-        //L"devenv.exe",       // Visual Studio
-        //L"explorer.exe"      // Windows Explorer
-        //L"dwm.exe",          // Desktop Window Manager (handles file operations)
-        //L"shell32.dll"       // Windows Shell (file operations)
+        L"explorer.exe"      // Windows Explorer - PRIMARY TARGET
+       // L"winword.exe",       // Microsoft Word
+       // L"excel.exe",         // Microsoft Excel
+       // L"powerpnt.exe",      // Microsoft PowerPoint
+       // L"acrord32.exe",      // Adobe Acrobat Reader
+      //  L"acrobat.exe",       // Adobe Acrobat
+       // L"chrome.exe",        // Google Chrome
+       // L"firefox.exe",       // Mozilla Firefox
+       // L"msedge.exe",        // Microsoft Edge
+       // L"notepad.exe",       // Notepad
+       // L"notepad++.exe",     // Notepad++
+       // L"code.exe",          // Visual Studio Code
+       // L"devenv.exe"         // Visual Studio
     };
     
     // Convert to lowercase for comparison
@@ -253,6 +315,8 @@ bool DLLInjector::ShouldInjectProcess(const std::wstring& processName) {
 bool DLLInjector::InjectDLLIntoProcess(DWORD processId, const std::wstring& dllPath) {
     HANDLE hProcess = OpenProcess(PROCESS_ALL_ACCESS, FALSE, processId);
     if (!hProcess) {
+        DWORD error = GetLastError();
+        Logger::Log(LOG_ERROR, L"Failed to open process " + std::to_wstring(processId) + L". Error: " + std::to_wstring(error));
         return false;
     }
     
@@ -261,6 +325,7 @@ bool DLLInjector::InjectDLLIntoProcess(DWORD processId, const std::wstring& dllP
     LPVOID pDllPath = VirtualAllocEx(hProcess, NULL, pathSize, MEM_COMMIT, PAGE_READWRITE);
     if (!pDllPath) {
         CloseHandle(hProcess);
+        Logger::Log(LOG_ERROR, L"Failed to allocate memory in target process");
         return false;
     }
     
@@ -268,6 +333,7 @@ bool DLLInjector::InjectDLLIntoProcess(DWORD processId, const std::wstring& dllP
     if (!WriteProcessMemory(hProcess, pDllPath, dllPath.c_str(), pathSize, NULL)) {
         VirtualFreeEx(hProcess, pDllPath, 0, MEM_RELEASE);
         CloseHandle(hProcess);
+        Logger::Log(LOG_ERROR, L"Failed to write DLL path to target process");
         return false;
     }
     
@@ -280,6 +346,7 @@ bool DLLInjector::InjectDLLIntoProcess(DWORD processId, const std::wstring& dllP
     if (!hThread) {
         VirtualFreeEx(hProcess, pDllPath, 0, MEM_RELEASE);
         CloseHandle(hProcess);
+        Logger::Log(LOG_ERROR, L"Failed to create remote thread in target process");
         return false;
     }
     
@@ -295,7 +362,12 @@ bool DLLInjector::InjectDLLIntoProcess(DWORD processId, const std::wstring& dllP
     VirtualFreeEx(hProcess, pDllPath, 0, MEM_RELEASE);
     CloseHandle(hProcess);
     
-    return (exitCode != 0); // Success if LoadLibraryW returned a non-zero handle
+    bool success = (exitCode != 0); // Success if LoadLibraryW returned a non-zero handle
+    if (!success) {
+        Logger::Log(LOG_ERROR, L"LoadLibraryW failed in target process. Exit code: " + std::to_wstring(exitCode));
+    }
+    
+    return success;
 }
 
 void DLLInjector::OnProcessCreated(DWORD processId) {
@@ -307,4 +379,3 @@ void DLLInjector::OnProcessTerminated(DWORD processId) {
     // Remove from our injected processes list
     UninjectDLL(processId);
 }
-

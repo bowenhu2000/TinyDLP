@@ -1,4 +1,4 @@
-#include "TinyDLP_Hook.h"
+﻿#include "TinyDLP_Hook.h"
 #include <algorithm>
 #include <psapi.h>
 
@@ -10,6 +10,8 @@ CreateFileW_t OriginalCreateFileW = nullptr;
 WriteFile_t OriginalWriteFile = nullptr;
 CopyFileW_t OriginalCopyFileW = nullptr;
 MoveFileW_t OriginalMoveFileW = nullptr;
+CopyFileExW_t OriginalCopyFileExW = nullptr;
+MoveFileExW_t OriginalMoveFileExW = nullptr;
 
 std::wofstream g_logFile;
 bool g_isHooked = false;
@@ -24,6 +26,9 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
     case DLL_PROCESS_ATTACH: {
         // Initialize critical section
         InitializeCriticalSection(&g_cs);
+        
+        // Ensure log directory exists
+        CreateDirectoryW(L"C:\\TinyDLP", NULL);
         
         // Open log file
         g_logFile.open(LOG_FILE_PATH, std::ios::app);
@@ -130,7 +135,11 @@ bool IsUSBDrive(const std::wstring& filePath) {
     
     // Check if it's a removable drive
     UINT driveType = GetDriveTypeW(drive.c_str());
-    return (driveType == DRIVE_REMOVABLE);
+    bool isRemovable = (driveType == DRIVE_REMOVABLE);
+    
+    LogMessage(LOG_INFO, L"Drive check for " + drive + L": Type=" + std::to_wstring(driveType) + L", IsRemovable=" + (isRemovable ? L"YES" : L"NO"));
+    
+    return isRemovable;
 }
 
 std::wstring GetProcessName() {
@@ -220,6 +229,24 @@ bool InstallHooks() {
         LogMessage(LOG_ERROR, L"Failed to get MoveFileW address");
     }
     
+    // Hook CopyFileExW
+    OriginalCopyFileExW = (CopyFileExW_t)GetProcAddress(hKernel32, "CopyFileExW");
+    if (OriginalCopyFileExW) {
+        DetourAttach(&(PVOID&)OriginalCopyFileExW, HookedCopyFileExW);
+        LogMessage(LOG_INFO, L"CopyFileExW hook attached");
+    } else {
+        LogMessage(LOG_ERROR, L"Failed to get CopyFileExW address");
+    }
+    
+    // Hook MoveFileExW
+    OriginalMoveFileExW = (MoveFileExW_t)GetProcAddress(hKernel32, "MoveFileExW");
+    if (OriginalMoveFileExW) {
+        DetourAttach(&(PVOID&)OriginalMoveFileExW, HookedMoveFileExW);
+        LogMessage(LOG_INFO, L"MoveFileExW hook attached");
+    } else {
+        LogMessage(LOG_ERROR, L"Failed to get MoveFileExW address");
+    }
+    
     // Commit the transaction
     LONG result = DetourTransactionCommit();
     if (result == NO_ERROR) {
@@ -252,6 +279,12 @@ void UninstallHooks() {
     if (OriginalMoveFileW) {
         DetourDetach(&(PVOID&)OriginalMoveFileW, HookedMoveFileW);
     }
+    if (OriginalCopyFileExW) {
+        DetourDetach(&(PVOID&)OriginalCopyFileExW, HookedCopyFileExW);
+    }
+    if (OriginalMoveFileExW) {
+        DetourDetach(&(PVOID&)OriginalMoveFileExW, HookedMoveFileExW);
+    }
     
     // Commit the transaction
     DetourTransactionCommit();
@@ -277,6 +310,7 @@ HANDLE WINAPI HookedCreateFileW(
     if (lpFileName) {
         std::wstring filePath(lpFileName);
         LogMessage(LOG_INFO, L"CreateFileW called for: " + filePath);
+        LogMessage(LOG_INFO, L"  Access: 0x" + std::to_wstring(dwDesiredAccess) + L", Disposition: " + std::to_wstring(dwCreationDisposition));
         
         // Check if this is a PDF file being created on a USB drive
         if (IsPDFFile(filePath) && IsUSBDrive(filePath)) {
@@ -298,6 +332,7 @@ HANDLE WINAPI HookedCreateFileW(
             EnterCriticalSection(&g_cs);
             g_fileHandleMap[result] = filePath;
             LeaveCriticalSection(&g_cs);
+            LogMessage(LOG_INFO, L"Tracking handle for PDF file: " + filePath);
         }
     }
     
@@ -320,11 +355,15 @@ BOOL WINAPI HookedWriteFile(
     }
     LeaveCriticalSection(&g_cs);
     
-    if (!filePath.empty() && IsPDFFile(filePath) && IsUSBDrive(filePath)) {
-        LogMessage(LOG_WARNING, L"PDF file write attempt detected on USB drive: " + filePath);
-        BlockFileOperation(filePath, L"WRITE_FILE");
-        SetLastError(ERROR_ACCESS_DENIED);
-        return FALSE;
+    if (!filePath.empty()) {
+        LogMessage(LOG_INFO, L"WriteFile called for tracked file: " + filePath + L", Bytes: " + std::to_wstring(nNumberOfBytesToWrite));
+        
+        if (IsPDFFile(filePath) && IsUSBDrive(filePath)) {
+            LogMessage(LOG_WARNING, L"PDF file write attempt detected on USB drive: " + filePath);
+            BlockFileOperation(filePath, L"WRITE_FILE");
+            SetLastError(ERROR_ACCESS_DENIED);
+            return FALSE;
+        }
     }
     
     // Call original function
@@ -339,7 +378,12 @@ BOOL WINAPI HookedCopyFileW(
 ) {
     if (lpNewFileName) {
         std::wstring filePath(lpNewFileName);
-        LogMessage(LOG_INFO, L"CopyFileW called for: " + filePath);
+        std::wstring sourcePath = lpExistingFileName ? std::wstring(lpExistingFileName) : L"<unknown>";
+        
+        LogMessage(LOG_INFO, L"CopyFileW called:");
+        LogMessage(LOG_INFO, L"  Source: " + sourcePath);
+        LogMessage(LOG_INFO, L"  Target: " + filePath);
+        LogMessage(LOG_INFO, L"  FailIfExists: " + (bFailIfExists) ? L"TRUE" : L"FALSE");
         
         if (IsPDFFile(filePath) && IsUSBDrive(filePath)) {
             LogMessage(LOG_WARNING, L"PDF file copy attempt detected on USB drive: " + filePath);
@@ -359,7 +403,11 @@ BOOL WINAPI HookedMoveFileW(
 ) {
     if (lpNewFileName) {
         std::wstring filePath(lpNewFileName);
-        LogMessage(LOG_INFO, L"MoveFileW called for: " + filePath);
+        std::wstring sourcePath = lpExistingFileName ? std::wstring(lpExistingFileName) : L"<unknown>";
+        
+        LogMessage(LOG_INFO, L"MoveFileW called:");
+        LogMessage(LOG_INFO, L"  Source: " + sourcePath);
+        LogMessage(LOG_INFO, L"  Target: " + filePath);
         
         if (IsPDFFile(filePath) && IsUSBDrive(filePath)) {
             LogMessage(LOG_WARNING, L"PDF file move attempt detected on USB drive: " + filePath);
@@ -371,4 +419,59 @@ BOOL WINAPI HookedMoveFileW(
     
     // Call original function
     return OriginalMoveFileW(lpExistingFileName, lpNewFileName);
+}
+
+BOOL WINAPI HookedCopyFileExW(
+    LPCWSTR lpExistingFileName,
+    LPCWSTR lpNewFileName,
+    LPPROGRESS_ROUTINE lpProgressRoutine,
+    LPVOID lpData,
+    LPBOOL pbCancel,
+    DWORD dwCopyFlags
+) {
+    if (lpNewFileName) {
+        std::wstring filePath(lpNewFileName);
+        std::wstring sourcePath = lpExistingFileName ? std::wstring(lpExistingFileName) : L"<unknown>";
+        
+        LogMessage(LOG_INFO, L"CopyFileExW called:");
+        LogMessage(LOG_INFO, L"  Source: " + sourcePath);
+        LogMessage(LOG_INFO, L"  Target: " + filePath);
+        LogMessage(LOG_INFO, L"  CopyFlags: 0x" + std::to_wstring(dwCopyFlags));
+        
+        if (IsPDFFile(filePath) && IsUSBDrive(filePath)) {
+            LogMessage(LOG_WARNING, L"PDF file copy (Ex) attempt detected on USB drive: " + filePath);
+            BlockFileOperation(filePath, L"COPY_FILE_EX");
+            SetLastError(ERROR_ACCESS_DENIED);
+            return FALSE;
+        }
+    }
+    
+    // Call original function
+    return OriginalCopyFileExW(lpExistingFileName, lpNewFileName, lpProgressRoutine, lpData, pbCancel, dwCopyFlags);
+}
+
+BOOL WINAPI HookedMoveFileExW(
+    LPCWSTR lpExistingFileName,
+    LPCWSTR lpNewFileName,
+    DWORD dwFlags
+) {
+    if (lpNewFileName) {
+        std::wstring filePath(lpNewFileName);
+        std::wstring sourcePath = lpExistingFileName ? std::wstring(lpExistingFileName) : L"<unknown>";
+        
+        LogMessage(LOG_INFO, L"MoveFileExW called:");
+        LogMessage(LOG_INFO, L"  Source: " + sourcePath);
+        LogMessage(LOG_INFO, L"  Target: " + filePath);
+        LogMessage(LOG_INFO, L"  Flags: 0x" + std::to_wstring(dwFlags));
+        
+        if (IsPDFFile(filePath) && IsUSBDrive(filePath)) {
+            LogMessage(LOG_WARNING, L"PDF file move (Ex) attempt detected on USB drive: " + filePath);
+            BlockFileOperation(filePath, L"MOVE_FILE_EX");
+            SetLastError(ERROR_ACCESS_DENIED);
+            return FALSE;
+        }
+    }
+    
+    // Call original function
+    return OriginalMoveFileExW(lpExistingFileName, lpNewFileName, dwFlags);
 }
