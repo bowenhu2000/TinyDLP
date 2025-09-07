@@ -222,14 +222,14 @@ bool DLLInjector::ShouldInjectProcess(const std::wstring& processName) {
         //L"powerpnt.exe",     // Microsoft PowerPoint
         //L"acrord32.exe",     // Adobe Acrobat Reader
         //L"acrobat.exe",      // Adobe Acrobat
-        //L"chrome.exe",       // Google Chrome
+        L"chrome.exe",       // Google Chrome
         //L"firefox.exe",      // Mozilla Firefox
         //L"msedge.exe",       // Microsoft Edge
         //L"notepad.exe",      // Notepad
         //L"notepad++.exe",    // Notepad++
         //L"code.exe",         // Visual Studio Code
         //L"devenv.exe",       // Visual Studio
-        L"explorer.exe"      // Windows Explorer
+        //L"explorer.exe"      // Windows Explorer
         //L"dwm.exe",          // Desktop Window Manager (handles file operations)
         //L"shell32.dll"       // Windows Shell (file operations)
     };

@@ -1,5 +1,4 @@
 #pragma once
-
 #include <windows.h>
 #include <string>
 #include <vector>
@@ -10,87 +9,37 @@
 #include <iomanip>
 #include <map>
 
+// Detours library includes
+#include "detours/detours.h"
+
 // Common constants
 #define LOG_FILE_PATH L"C:\\TinyDLP\\TinyDLP_Hook.log"
 #define MAX_PATH_LENGTH 260
 
 // Log levels
-enum LogLevel {
-    LOG_INFO,
-    LOG_WARNING,
-    LOG_ERROR
-};
+enum LogLevel { LOG_INFO, LOG_WARNING, LOG_ERROR };
 
 // Function pointer types for original API functions
-typedef HANDLE (WINAPI* CreateFileW_t)(
-    LPCWSTR lpFileName,
-    DWORD dwDesiredAccess,
-    DWORD dwShareMode,
-    LPSECURITY_ATTRIBUTES lpSecurityAttributes,
-    DWORD dwCreationDisposition,
-    DWORD dwFlagsAndAttributes,
-    HANDLE hTemplateFile
-);
-
-typedef BOOL (WINAPI* WriteFile_t)(
-    HANDLE hFile,
-    LPCVOID lpBuffer,
-    DWORD nNumberOfBytesToWrite,
-    LPDWORD lpNumberOfBytesWritten,
-    LPOVERLAPPED lpOverlapped
-);
-
-typedef BOOL (WINAPI* CopyFileW_t)(
-    LPCWSTR lpExistingFileName,
-    LPCWSTR lpNewFileName,
-    BOOL bFailIfExists
-);
-
-typedef BOOL (WINAPI* MoveFileW_t)(
-    LPCWSTR lpExistingFileName,
-    LPCWSTR lpNewFileName
-);
+typedef HANDLE (WINAPI* CreateFileW_t)(LPCWSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShareMode, LPSECURITY_ATTRIBUTES lpSecurityAttributes, DWORD dwCreationDisposition, DWORD dwFlagsAndAttributes, HANDLE hTemplateFile);
+typedef BOOL (WINAPI* WriteFile_t)(HANDLE hFile, LPCVOID lpBuffer, DWORD nNumberOfBytesToWrite, LPDWORD lpNumberOfBytesWritten, LPOVERLAPPED lpOverlapped);
+typedef BOOL (WINAPI* CopyFileW_t)(LPCWSTR lpExistingFileName, LPCWSTR lpNewFileName, BOOL bFailIfExists);
+typedef BOOL (WINAPI* MoveFileW_t)(LPCWSTR lpExistingFileName, LPCWSTR lpNewFileName);
 
 // Global variables
 extern CreateFileW_t OriginalCreateFileW;
 extern WriteFile_t OriginalWriteFile;
 extern CopyFileW_t OriginalCopyFileW;
 extern MoveFileW_t OriginalMoveFileW;
-
 extern std::wofstream g_logFile;
 extern bool g_isHooked;
 extern std::map<HANDLE, std::wstring> g_fileHandleMap;
 extern CRITICAL_SECTION g_cs;
 
 // Hooked function declarations
-HANDLE WINAPI HookedCreateFileW(
-    LPCWSTR lpFileName,
-    DWORD dwDesiredAccess,
-    DWORD dwShareMode,
-    LPSECURITY_ATTRIBUTES lpSecurityAttributes,
-    DWORD dwCreationDisposition,
-    DWORD dwFlagsAndAttributes,
-    HANDLE hTemplateFile
-);
-
-BOOL WINAPI HookedWriteFile(
-    HANDLE hFile,
-    LPCVOID lpBuffer,
-    DWORD nNumberOfBytesToWrite,
-    LPDWORD lpNumberOfBytesWritten,
-    LPOVERLAPPED lpOverlapped
-);
-
-BOOL WINAPI HookedCopyFileW(
-    LPCWSTR lpExistingFileName,
-    LPCWSTR lpNewFileName,
-    BOOL bFailIfExists
-);
-
-BOOL WINAPI HookedMoveFileW(
-    LPCWSTR lpExistingFileName,
-    LPCWSTR lpNewFileName
-);
+HANDLE WINAPI HookedCreateFileW(LPCWSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShareMode, LPSECURITY_ATTRIBUTES lpSecurityAttributes, DWORD dwCreationDisposition, DWORD dwFlagsAndAttributes, HANDLE hTemplateFile);
+BOOL WINAPI HookedWriteFile(HANDLE hFile, LPCVOID lpBuffer, DWORD nNumberOfBytesToWrite, LPDWORD lpNumberOfBytesWritten, LPOVERLAPPED lpOverlapped);
+BOOL WINAPI HookedCopyFileW(LPCWSTR lpExistingFileName, LPCWSTR lpNewFileName, BOOL bFailIfExists);
+BOOL WINAPI HookedMoveFileW(LPCWSTR lpExistingFileName, LPCWSTR lpNewFileName);
 
 // Helper functions
 void LogMessage(LogLevel level, const std::wstring& message);
