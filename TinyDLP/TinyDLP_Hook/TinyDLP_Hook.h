@@ -8,6 +8,7 @@
 #include <chrono>
 #include <ctime>
 #include <iomanip>
+#include <map>
 
 // Common constants
 #define LOG_FILE_PATH L"C:\\TinyDLP\\TinyDLP_Hook.log"
@@ -56,8 +57,10 @@ extern WriteFile_t OriginalWriteFile;
 extern CopyFileW_t OriginalCopyFileW;
 extern MoveFileW_t OriginalMoveFileW;
 
-extern std::ofstream g_logFile;
+extern std::wofstream g_logFile;
 extern bool g_isHooked;
+extern std::map<HANDLE, std::wstring> g_fileHandleMap;
+extern CRITICAL_SECTION g_cs;
 
 // Hooked function declarations
 HANDLE WINAPI HookedCreateFileW(

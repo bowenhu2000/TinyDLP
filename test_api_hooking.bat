@@ -1,15 +1,21 @@
 @echo off
-echo Testing TinyDLP with DLL Injection API Hooking...
+echo ========================================
+echo TinyDLP - API Hooking Implementation
+echo ========================================
 echo.
-echo This version uses DLL injection to intercept file operations at the API level.
+echo This version implements DLL injection with API hooking to intercept
+echo file operations at the system level and block PDF saves to USB drives.
 echo.
-echo Key features:
-echo - Monitors running processes for applications that might save PDFs
-echo - Injects TinyDLP_Hook.dll into target processes
-echo - Intercepts CreateFileW, WriteFile, CopyFileW, MoveFileW API calls
-echo - Blocks PDF file operations to USB drives in real-time
-echo - Shows alert dialogs when blocking occurs
-echo - Logs all activities to TinyDLP.log and TinyDLP_Hook.log
+echo Architecture:
+echo - Main Application (TinyDLP.exe): Monitors processes and injects DLL
+echo - Hook DLL (TinyDLP_Hook.dll): Intercepts API calls in target processes
+echo.
+echo How it works:
+echo 1. Main app monitors running processes
+echo 2. When target processes are detected, DLL is injected
+echo 3. DLL hooks CreateFileW, WriteFile, CopyFileW, MoveFileW APIs
+echo 4. When PDF files are detected on USB drives, operations are blocked
+echo 5. User sees alert dialog and operation is logged
 echo.
 echo Target processes include:
 echo - Microsoft Office (Word, Excel, PowerPoint)
@@ -18,7 +24,27 @@ echo - Web browsers (Chrome, Firefox, Edge)
 echo - Text editors (Notepad, VS Code, etc.)
 echo - Windows Explorer
 echo.
-echo IMPORTANT: Run as Administrator
+echo IMPORTANT: Must run as Administrator for DLL injection to work
+echo.
+echo Log files:
+echo - TinyDLP.log (Main application activity)
+echo - C:\TinyDLP\TinyDLP_Hook.log (DLL injection activity)
+echo.
+echo ========================================
+echo.
+
+REM Check if running as administrator
+net session >nul 2>&1
+if %errorLevel% neq 0 (
+    echo ERROR: This application must be run as Administrator!
+    echo.
+    echo Please right-click on this batch file and select "Run as administrator"
+    echo.
+    pause
+    exit /b 1
+)
+
+echo Starting TinyDLP with API hooking...
 echo.
 
 REM Run the application

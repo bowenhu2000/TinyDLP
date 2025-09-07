@@ -10,7 +10,7 @@ WriteFile_t OriginalWriteFile = nullptr;
 CopyFileW_t OriginalCopyFileW = nullptr;
 MoveFileW_t OriginalMoveFileW = nullptr;
 
-std::ofstream g_logFile;
+std::wofstream g_logFile;
 bool g_isHooked = false;
 
 // Handle to file path mapping for tracking
@@ -20,7 +20,7 @@ CRITICAL_SECTION g_cs;
 // DLL Entry Point
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserved) {
     switch (ul_reason_for_call) {
-    case DLL_PROCESS_ATTACH:
+    case DLL_PROCESS_ATTACH: {
         // Initialize critical section
         InitializeCriticalSection(&g_cs);
         
@@ -30,7 +30,17 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
             g_logFile.imbue(std::locale("C"));
         }
         
-        LogMessage(LOG_INFO, L"DLL loaded into process: " + GetProcessName());
+        // Log DLL injection success with detailed information
+        std::wstring processName = GetProcessName();
+        DWORD processId = GetCurrentProcessId();
+        std::wstring timestamp = GetCurrentTimestamp();
+        
+        LogMessage(LOG_INFO, L"=== TinyDLP Hook DLL Successfully Injected ===");
+        LogMessage(LOG_INFO, L"Target Process: " + processName);
+        LogMessage(LOG_INFO, L"Process ID: " + std::to_wstring(processId));
+        LogMessage(LOG_INFO, L"Injection Time: " + timestamp);
+        LogMessage(LOG_INFO, L"DLL Path: " + std::wstring(LOG_FILE_PATH));
+        LogMessage(LOG_INFO, L"Ready to intercept file operations for PDF blocking");
         
         // Install hooks
         if (InstallHooks()) {
@@ -40,8 +50,9 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
             LogMessage(LOG_ERROR, L"Failed to install hooks");
         }
         break;
+    }
         
-    case DLL_PROCESS_DETACH:
+    case DLL_PROCESS_DETACH: {
         if (g_isHooked) {
             UninstallHooks();
             LogMessage(LOG_INFO, L"Hooks uninstalled");
@@ -55,8 +66,10 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
         LogMessage(LOG_INFO, L"DLL unloaded from process");
         break;
     }
+    }
     return TRUE;
 }
+
 
 // Logging functions
 void LogMessage(LogLevel level, const std::wstring& message) {
@@ -71,8 +84,12 @@ void LogMessage(LogLevel level, const std::wstring& message) {
     case LOG_ERROR: levelStr = L"ERROR"; break;
     }
     
-    g_logFile << L"[" << timestamp << L"] [" << levelStr << L"] " << message << std::endl;
-    g_logFile.flush();
+    try {
+        g_logFile << L"[" << timestamp << L"] [" << levelStr << L"] " << message << std::endl;
+        g_logFile.flush();
+    } catch (const std::exception&) {
+        // If logging fails, continue silently
+    }
 }
 
 std::wstring GetCurrentTimestamp() {
@@ -140,10 +157,10 @@ void BlockFileOperation(const std::wstring& filePath, const std::wstring& operat
         L" (PID: " + std::to_wstring(processId) + L") | File: " + filePath);
     
     // Show message box to user
-    std::wstring message = L"TinyDLP has blocked an attempt to save a PDF file to a USB drive.\n\n" +
-        L"Process: " + processName + L"\n" +
-        L"File: " + filePath + L"\n" +
-        L"Operation: " + operation;
+    std::wstring message = L"TinyDLP has blocked an attempt to save a PDF file to a USB drive.\\n\\n";
+    message += L"Process: " + processName + L"\\n";
+    message += L"File: " + filePath + L"\\n";
+    message += L"Operation: " + operation;
     
     MessageBoxW(NULL, message.c_str(), L"TinyDLP - PDF Save Blocked", 
         MB_ICONWARNING | MB_OK | MB_TOPMOST);
@@ -179,6 +196,7 @@ void UninstallHooks() {
     g_fileHandleMap.clear();
     LeaveCriticalSection(&g_cs);
 }
+
 // Hooked function implementations
 HANDLE WINAPI HookedCreateFileW(
     LPCWSTR lpFileName,
@@ -286,3 +304,7 @@ BOOL WINAPI HookedMoveFileW(
     // Call original function
     return OriginalMoveFileW(lpExistingFileName, lpNewFileName);
 }
+
+
+
+

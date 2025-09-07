@@ -21,6 +21,7 @@ public:
     static bool InjectDLL(DWORD processId);
     static void UninjectDLL(DWORD processId);
     static bool IsProcessInjected(DWORD processId);
+    static bool IsProcessInjectedUnsafe(DWORD processId);
     
 private:
     static void ProcessMonitorThread();
@@ -32,5 +33,6 @@ private:
     static void OnProcessTerminated(DWORD processId);
 };
 
-// Process monitoring thread
-static std::thread g_processMonitorThread;
+
+
+

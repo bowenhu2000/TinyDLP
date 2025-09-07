@@ -141,7 +141,12 @@ bool DLLInjector::InjectDLL(DWORD processId) {
     
     if (InjectDLLIntoProcess(processId, hookDllPath)) {
         injectedProcesses.push_back(processId);
-        Logger::Log(LOG_INFO, L"Injected DLL into process: " + processName + L" (PID: " + std::to_wstring(processId) + L")");
+        // Enhanced logging for successful DLL injection
+        Logger::Log(LOG_INFO, L"=== DLL Injection Successful ===");
+        Logger::Log(LOG_INFO, L"Target Process: " + processName);
+        Logger::Log(LOG_INFO, L"Process ID: " + std::to_wstring(processId));
+        Logger::Log(LOG_INFO, L"DLL Path: C:\\Users\\BowenGit\\Documents\\GitHub\\TinyDLP\\x64\\Release\\TinyDLP_Hook.dll");
+        Logger::Log(LOG_INFO, L"Process is now protected against PDF saves to USB drives");
         return true;
     } else {
         Logger::Log(LOG_ERROR, L"Failed to inject DLL into process: " + processName + L" (PID: " + std::to_wstring(processId) + L")");
@@ -160,7 +165,7 @@ void DLLInjector::UninjectDLL(DWORD processId) {
 }
 
 bool DLLInjector::IsProcessInjected(DWORD processId) {
-    std::lock_guard<std::mutex> lock(injectorMutex);
+//    std::lock_guard<std::mutex> lock(injectorMutex);
     return std::find(injectedProcesses.begin(), injectedProcesses.end(), processId) != injectedProcesses.end();
 }
 
@@ -212,19 +217,21 @@ std::wstring DLLInjector::GetProcessName(DWORD processId) {
 bool DLLInjector::ShouldInjectProcess(const std::wstring& processName) {
     // List of processes that might save PDF files
     std::vector<std::wstring> targetProcesses = {
-        L"winword.exe",      // Microsoft Word
-        L"excel.exe",        // Microsoft Excel
-        L"powerpnt.exe",     // Microsoft PowerPoint
-        L"acrord32.exe",     // Adobe Acrobat Reader
-        L"acrobat.exe",      // Adobe Acrobat
-        L"chrome.exe",       // Google Chrome
-        L"firefox.exe",      // Mozilla Firefox
-        L"msedge.exe",       // Microsoft Edge
-        L"notepad.exe",      // Notepad
-        L"notepad++.exe",    // Notepad++
-        L"code.exe",         // Visual Studio Code
-        L"devenv.exe",       // Visual Studio
+        //L"winword.exe",      // Microsoft Word
+        //L"excel.exe",        // Microsoft Excel
+        //L"powerpnt.exe",     // Microsoft PowerPoint
+        //L"acrord32.exe",     // Adobe Acrobat Reader
+        //L"acrobat.exe",      // Adobe Acrobat
+        //L"chrome.exe",       // Google Chrome
+        //L"firefox.exe",      // Mozilla Firefox
+        //L"msedge.exe",       // Microsoft Edge
+        //L"notepad.exe",      // Notepad
+        //L"notepad++.exe",    // Notepad++
+        //L"code.exe",         // Visual Studio Code
+        //L"devenv.exe",       // Visual Studio
         L"explorer.exe"      // Windows Explorer
+        //L"dwm.exe",          // Desktop Window Manager (handles file operations)
+        //L"shell32.dll"       // Windows Shell (file operations)
     };
     
     // Convert to lowercase for comparison
@@ -300,3 +307,4 @@ void DLLInjector::OnProcessTerminated(DWORD processId) {
     // Remove from our injected processes list
     UninjectDLL(processId);
 }
+
