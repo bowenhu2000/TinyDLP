@@ -1,7 +1,24 @@
 #pragma once
 
-#include "Common.h"
-#include <map>
+#include <windows.h>
+#include <string>
+#include <vector>
+#include <fstream>
+#include <sstream>
+#include <chrono>
+#include <ctime>
+#include <iomanip>
+
+// Common constants
+#define LOG_FILE_PATH L"C:\\TinyDLP\\TinyDLP_Hook.log"
+#define MAX_PATH_LENGTH 260
+
+// Log levels
+enum LogLevel {
+    LOG_INFO,
+    LOG_WARNING,
+    LOG_ERROR
+};
 
 // Function pointer types for original API functions
 typedef HANDLE (WINAPI* CreateFileW_t)(
@@ -33,34 +50,16 @@ typedef BOOL (WINAPI* MoveFileW_t)(
     LPCWSTR lpNewFileName
 );
 
-// API Hook Manager Class
-class APIHook {
-public:
-    // Original function pointers (made public for hooked functions)
-    static CreateFileW_t OriginalCreateFileW;
-    static WriteFile_t OriginalWriteFile;
-    static CopyFileW_t OriginalCopyFileW;
-    static MoveFileW_t OriginalMoveFileW;
+// Global variables
+extern CreateFileW_t OriginalCreateFileW;
+extern WriteFile_t OriginalWriteFile;
+extern CopyFileW_t OriginalCopyFileW;
+extern MoveFileW_t OriginalMoveFileW;
 
-    // Public members for hooked functions
-    static std::mutex hookMutex;
-    static std::map<HANDLE, std::wstring> fileHandleMap;
+extern std::ofstream g_logFile;
+extern bool g_isHooked;
 
-    static bool Initialize();
-    static void Shutdown();
-    static bool IsFileBlocked(const std::wstring& filePath);
-    static void BlockFileOperation(const std::wstring& filePath, const std::wstring& operation);
-    static std::wstring GetProcessName(DWORD processId);
-    static bool IsPDFFile(const std::wstring& filePath);
-    static bool IsUSBDrive(const std::wstring& filePath);
-    
-private:
-    static bool isInitialized;
-    static bool SetupHooks();
-    static void CleanupHooks();
-};
-
-// Hooked function implementations
+// Hooked function declarations
 HANDLE WINAPI HookedCreateFileW(
     LPCWSTR lpFileName,
     DWORD dwDesiredAccess,
@@ -89,3 +88,13 @@ BOOL WINAPI HookedMoveFileW(
     LPCWSTR lpExistingFileName,
     LPCWSTR lpNewFileName
 );
+
+// Helper functions
+void LogMessage(LogLevel level, const std::wstring& message);
+std::wstring GetCurrentTimestamp();
+bool IsPDFFile(const std::wstring& filePath);
+bool IsUSBDrive(const std::wstring& filePath);
+std::wstring GetProcessName();
+void BlockFileOperation(const std::wstring& filePath, const std::wstring& operation);
+bool InstallHooks();
+void UninstallHooks();

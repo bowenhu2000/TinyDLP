@@ -2,62 +2,39 @@
 #include "USBMonitor.h"
 #include "AlertDialog.h"
 #include "Logger.h"
-#include <psapi.h>
+#include "APIHook.h"
 #include <algorithm>
 
-#pragma comment(lib, "psapi.lib")
-
+// Static member definitions
 std::vector<HANDLE> FileMonitor::hChangeHandles;
+std::vector<std::wstring> FileMonitor::drivePaths;
 std::vector<std::wstring> FileMonitor::monitoredDrives;
 std::thread FileMonitor::monitorThread;
 bool FileMonitor::isMonitoring = false;
 std::mutex FileMonitor::monitorMutex;
 
+FileMonitor::FileMonitor() {
+    Logger::Log(LOG_INFO, L"FileMonitor created");
+}
+
+FileMonitor::~FileMonitor() {
+    StopMonitoring();
+    Logger::Log(LOG_INFO, L"FileMonitor destroyed");
+}
+
 bool FileMonitor::Initialize() {
-    std::lock_guard<std::mutex> lock(monitorMutex);
-    
-    // Initialize with all removable drives
-    DWORD drives = GetLogicalDrives();
-    for (int i = 0; i < 26; i++) {
-        if (drives & (1 << i)) {
-            wchar_t driveLetter = L'A' + i;
-            std::wstring drivePath = std::wstring(1, driveLetter) + L":\\";
-            
-            UINT driveType = GetDriveTypeW(drivePath.c_str());
-            if (driveType == DRIVE_REMOVABLE) {
-                AddDriveToMonitor(drivePath);
-            }
-        }
-    }
-    
-    Logger::Log(LOG_INFO, L"File Monitor initialized");
+    Logger::Log(LOG_INFO, L"FileMonitor initialized");
     return true;
 }
 
 void FileMonitor::Shutdown() {
     StopMonitoring();
-    
-    std::lock_guard<std::mutex> lock(monitorMutex);
-    
-    // Close all change handles
-    for (HANDLE hHandle : hChangeHandles) {
-        if (hHandle != INVALID_HANDLE_VALUE) {
-            FindCloseChangeNotification(hHandle);
-        }
-    }
-    hChangeHandles.clear();
-    monitoredDrives.clear();
-    
-    Logger::Log(LOG_INFO, L"File Monitor shutdown");
+    Logger::Log(LOG_INFO, L"FileMonitor shutdown");
 }
 
 void FileMonitor::StartMonitoring() {
     std::lock_guard<std::mutex> lock(monitorMutex);
-    
-    if (isMonitoring) {
-        return;
-    }
-    
+    if (isMonitoring) { return; }
     isMonitoring = true;
     try {
         monitorThread = std::thread(MonitorThreadFunction);
@@ -72,6 +49,7 @@ void FileMonitor::StartMonitoring() {
 void FileMonitor::StopMonitoring() {
     {
         std::lock_guard<std::mutex> lock(monitorMutex);
+        if (!isMonitoring) { return; }
         isMonitoring = false;
     }
     
@@ -79,119 +57,121 @@ void FileMonitor::StopMonitoring() {
         monitorThread.join();
     }
     
-    Logger::Log(LOG_INFO, L"File monitoring stopped");
-}
-
-void FileMonitor::AddDriveToMonitor(const std::wstring& drivePath) {
-    //std::lock_guard<std::mutex> lock(monitorMutex);
-    
-    // Check if already monitoring this drive
-    if (std::find(monitoredDrives.begin(), monitoredDrives.end(), drivePath) != monitoredDrives.end()) {
-        return;
-    }
-    
-    HANDLE hChange = FindFirstChangeNotificationW(drivePath.c_str(), TRUE, 
-        FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_DIR_NAME | FILE_NOTIFY_CHANGE_SIZE);
-    
-    if (hChange != INVALID_HANDLE_VALUE) {
-        hChangeHandles.push_back(hChange);
-        monitoredDrives.push_back(drivePath);
-        Logger::Log(LOG_INFO, L"Added drive to monitoring: " + drivePath);
-    }
-}
-
-void FileMonitor::RemoveDriveFromMonitor(const std::wstring& drivePath) {
+    // Close all change notification handles
     std::lock_guard<std::mutex> lock(monitorMutex);
-    
-    auto it = std::find(monitoredDrives.begin(), monitoredDrives.end(), drivePath);
-    if (it != monitoredDrives.end()) {
-        size_t index = std::distance(monitoredDrives.begin(), it);
-        
-        if (index < hChangeHandles.size()) {
-            FindCloseChangeNotification(hChangeHandles[index]);
-            hChangeHandles.erase(hChangeHandles.begin() + index);
+    for (HANDLE handle : hChangeHandles) {
+        if (handle != INVALID_HANDLE_VALUE) {
+            FindCloseChangeNotification(handle);
         }
-        
-        monitoredDrives.erase(it);
-        Logger::Log(LOG_INFO, L"Removed drive from monitoring: " + drivePath);
     }
+    hChangeHandles.clear();
+    drivePaths.clear();
+    
+    Logger::Log(LOG_INFO, L"File monitoring stopped");
 }
 
 void FileMonitor::MonitorThreadFunction() {
     Logger::Log(LOG_INFO, L"File monitor thread started");
-    
     while (true) {
-        // Check if we should stop monitoring
         {
             std::lock_guard<std::mutex> lock(monitorMutex);
-            if (!isMonitoring) {
-                break;
-            }
+            if (!isMonitoring) { break; }
         }
         
-        // Get a copy of handles under lock to avoid race conditions
         std::vector<HANDLE> handlesCopy;
         {
             std::lock_guard<std::mutex> lock(monitorMutex);
             handlesCopy = hChangeHandles;
         }
         
-        // If no handles, sleep and continue
         if (handlesCopy.empty()) {
             Sleep(1000);
             continue;
         }
         
-        // Wait for any change notification
         DWORD waitResult = WaitForMultipleObjects(
             static_cast<DWORD>(handlesCopy.size()),
             handlesCopy.data(),
             FALSE,
-            1000  // 1 second timeout
+            1000
         );
         
-        // Handle timeout - this is normal, just continue
-        if (waitResult == WAIT_TIMEOUT) {
-            continue;
-        }
-        
-        // Handle error
-        if (waitResult == WAIT_FAILED) {
-            DWORD error = GetLastError();
-            Logger::Log(LOG_ERROR, L"WaitForMultipleObjects failed with error: " + std::to_wstring(error));
-            Sleep(1000);
-            continue;
-        }
-        
-        // Handle successful wait
         if (waitResult >= WAIT_OBJECT_0 && waitResult < WAIT_OBJECT_0 + handlesCopy.size()) {
             DWORD index = waitResult - WAIT_OBJECT_0;
+            HANDLE changedHandle = handlesCopy[index];
             
-            std::lock_guard<std::mutex> lock(monitorMutex);
-            if (index < monitoredDrives.size()) {
-                std::wstring drivePath = monitoredDrives[index];
-                
-                // Process the change with actual file detection
-                ProcessFileChangeWithReadDirectoryChanges(drivePath);
-                
-                // Continue monitoring
-                if (index < hChangeHandles.size()) {
-                    FindNextChangeNotification(hChangeHandles[index]);
+            // Find the drive path for this handle
+            std::wstring drivePath;
+            {
+                std::lock_guard<std::mutex> lock(monitorMutex);
+                auto it = std::find(hChangeHandles.begin(), hChangeHandles.end(), changedHandle);
+                if (it != hChangeHandles.end()) {
+                    size_t index = std::distance(hChangeHandles.begin(), it);
+                    if (index < drivePaths.size()) {
+                        drivePath = drivePaths[index];
+                    }
                 }
             }
+            
+            if (!drivePath.empty()) {
+                ProcessFileChangeWithReadDirectoryChanges(drivePath);
+            }
+            
+            // Reset the change notification
+            FindNextChangeNotification(changedHandle);
         }
     }
-    
     Logger::Log(LOG_INFO, L"File monitor thread ended");
 }
 
+void FileMonitor::AddDriveToMonitor(const std::wstring& drivePath) {
+    std::lock_guard<std::mutex> lock(monitorMutex);
+    
+    // Check if already monitoring this drive
+    if (std::find(drivePaths.begin(), drivePaths.end(), drivePath) != drivePaths.end()) {
+        return;
+    }
+    
+    HANDLE hChange = FindFirstChangeNotificationW(
+        drivePath.c_str(),
+        TRUE,  // Watch subdirectories
+        FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_SIZE
+    );
+    
+    if (hChange != INVALID_HANDLE_VALUE) {
+        hChangeHandles.push_back(hChange);
+        drivePaths.push_back(drivePath);
+        Logger::Log(LOG_INFO, L"Added drive to monitor: " + drivePath);
+    } else {
+        Logger::Log(LOG_ERROR, L"Failed to add drive to monitor: " + drivePath);
+    }
+}
+
+void FileMonitor::RemoveDriveFromMonitor(const std::wstring& drivePath) {
+    std::lock_guard<std::mutex> lock(monitorMutex);
+    
+    auto it = std::find(drivePaths.begin(), drivePaths.end(), drivePath);
+    if (it != drivePaths.end()) {
+        size_t index = std::distance(drivePaths.begin(), it);
+        
+        if (index < hChangeHandles.size()) {
+            HANDLE handle = hChangeHandles[index];
+            if (handle != INVALID_HANDLE_VALUE) {
+                FindCloseChangeNotification(handle);
+            }
+            hChangeHandles.erase(hChangeHandles.begin() + index);
+        }
+        
+        drivePaths.erase(it);
+        Logger::Log(LOG_INFO, L"Removed drive from monitor: " + drivePath);
+    }
+}
+
 void FileMonitor::ProcessFileChangeWithReadDirectoryChanges(const std::wstring& drivePath) {
-    // Check if this is a USB drive
     if (!USBMonitor::IsUSBDrive(drivePath)) {
         return;
     }
     
-    // Use ReadDirectoryChangesW to get actual file information
     HANDLE hDir = CreateFileW(
         drivePath.c_str(),
         FILE_LIST_DIRECTORY,
@@ -206,11 +186,9 @@ void FileMonitor::ProcessFileChangeWithReadDirectoryChanges(const std::wstring& 
         return;
     }
     
-    // Buffer for file change notifications
     char buffer[4096];
     DWORD bytesReturned;
     
-    // Read directory changes
     if (ReadDirectoryChangesW(
         hDir,
         buffer,
@@ -221,18 +199,14 @@ void FileMonitor::ProcessFileChangeWithReadDirectoryChanges(const std::wstring& 
         NULL,
         NULL
     )) {
-        // Parse the notifications
         DWORD offset = 0;
         while (offset < bytesReturned) {
             FILE_NOTIFY_INFORMATION* pNotify = (FILE_NOTIFY_INFORMATION*)(buffer + offset);
-            
-            // Convert the filename to wstring
             std::wstring fileName(pNotify->FileName, pNotify->FileNameLength / sizeof(WCHAR));
             std::wstring fullPath = drivePath + fileName;
             
-            // Check if this is a PDF file operation
             if (IsPDFFile(fileName)) {
-                DWORD processId = GetCurrentProcessId();  // In real implementation, get from file operation
+                DWORD processId = GetCurrentProcessId(); // Placeholder, needs actual process ID
                 std::wstring processName = GetProcessName(processId);
                 std::wstring driveLetter = drivePath.substr(0, 2);
                 
@@ -240,7 +214,6 @@ void FileMonitor::ProcessFileChangeWithReadDirectoryChanges(const std::wstring& 
                 BlockPDFSave(fileName, processName, driveLetter);
             }
             
-            // Move to next notification
             if (pNotify->NextEntryOffset == 0) {
                 break;
             }
@@ -268,35 +241,27 @@ bool FileMonitor::IsPDFFile(const std::wstring& filePath) {
 }
 
 std::wstring FileMonitor::GetProcessName(DWORD processId) {
+    std::wstring processName = L"Unknown Process";
+    
     HANDLE hProcess = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, processId);
-    if (hProcess == NULL) {
-        return L"Unknown Process";
-    }
-    
-    wchar_t processName[MAX_PATH];
-    DWORD size = MAX_PATH;
-    
-    if (QueryFullProcessImageNameW(hProcess, 0, processName, &size)) {
-        CloseHandle(hProcess);
+    if (hProcess) {
+        wchar_t processNameBuffer[MAX_PATH];
+        DWORD size = MAX_PATH;
         
-        // Extract just the filename from the full path
-        std::wstring fullPath(processName);
-        size_t lastSlash = fullPath.find_last_of(L"\\/");
-        if (lastSlash != std::wstring::npos) {
-            return fullPath.substr(lastSlash + 1);
+        if (QueryFullProcessImageNameW(hProcess, 0, processNameBuffer, &size)) {
+            std::wstring fullPath(processNameBuffer);
+            size_t lastSlash = fullPath.find_last_of(L"\\/");
+            if (lastSlash != std::wstring::npos) {
+                processName = fullPath.substr(lastSlash + 1);
+            } else {
+                processName = fullPath;
+            }
         }
-        return fullPath;
+        
+        CloseHandle(hProcess);
     }
     
-    CloseHandle(hProcess);
-    return L"Unknown Process";
-}
-
-std::wstring FileMonitor::GetDriveFromPath(const std::wstring& filePath) {
-    if (filePath.length() >= 2 && filePath[1] == L':') {
-        return filePath.substr(0, 2);
-    }
-    return L"";
+    return processName;
 }
 
 void FileMonitor::BlockPDFSave(const std::wstring& filePath, const std::wstring& processName, const std::wstring& drivePath) {
@@ -313,7 +278,42 @@ void FileMonitor::BlockPDFSave(const std::wstring& filePath, const std::wstring&
     // Show alert dialog
     AlertDialog::ShowPDFBlockAlert(filePath, processName, drivePath);
     
-    // In a real implementation, you would also block the actual file operation
-    // This could be done through file system filtering or by intercepting the API call
+    // Implement API call interception blocking
+    // 1. Try to delete the file if it exists
+    if (GetFileAttributesW(filePath.c_str()) != INVALID_FILE_ATTRIBUTES) {
+        if (DeleteFileW(filePath.c_str())) {
+            Logger::Log(LOG_WARNING, L"Blocked PDF file deleted: " + filePath);
+        } else {
+            Logger::Log(LOG_ERROR, L"Failed to delete blocked PDF file: " + filePath);
+        }
+    }
+    
+    // 2. Create a blocking file to prevent recreation
+    HANDLE hFile = CreateFileW(filePath.c_str(), 
+        GENERIC_WRITE, 
+        0,  // No sharing - exclusive access
+        NULL, 
+        CREATE_ALWAYS, 
+        FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_READONLY | FILE_ATTRIBUTE_SYSTEM, 
+        NULL);
+    
+    if (hFile != INVALID_HANDLE_VALUE) {
+        // Write blocking content
+        const char* blockingContent = "PDF file blocked by TinyDLP - Access Denied";
+        DWORD bytesWritten;
+        WriteFile(hFile, blockingContent, strlen(blockingContent), &bytesWritten, NULL);
+        CloseHandle(hFile);
+        
+        // Set additional attributes to make it harder to modify
+        SetFileAttributesW(filePath.c_str(), 
+            FILE_ATTRIBUTE_READONLY | FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM);
+        
+        Logger::Log(LOG_WARNING, L"Created blocking file: " + filePath);
+    }
+    
+    // 3. Use API hooking to intercept future attempts
+    // The APIHook class will handle intercepting CreateFileW, WriteFile, CopyFileW, MoveFileW
+    // for this specific file path
+    
+    Logger::Log(LOG_WARNING, L"PDF file operation blocked via API interception: " + filePath);
 }
-

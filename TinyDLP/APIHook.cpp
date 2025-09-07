@@ -3,42 +3,46 @@
 #include "AlertDialog.h"
 #include "USBMonitor.h"
 #include <psapi.h>
-#include <tlhelp32.h>
+#include <algorithm>
 
 #pragma comment(lib, "psapi.lib")
 
-// Global variables
-bool APIHook::isHooked = false;
-std::vector<DWORD> APIHook::hookedProcesses;
+// Static member definitions
+bool APIHook::isInitialized = false;
 std::mutex APIHook::hookMutex;
+std::map<HANDLE, std::wstring> APIHook::fileHandleMap;
 
-// Function pointers for original API functions
-CreateFileW_t OriginalCreateFileW = nullptr;
-WriteFile_t OriginalWriteFile = nullptr;
-CreateDirectoryW_t OriginalCreateDirectoryW = nullptr;
+// Original function pointers
+CreateFileW_t APIHook::OriginalCreateFileW = nullptr;
+WriteFile_t APIHook::OriginalWriteFile = nullptr;
+CopyFileW_t APIHook::OriginalCopyFileW = nullptr;
+MoveFileW_t APIHook::OriginalMoveFileW = nullptr;
 
 bool APIHook::Initialize() {
     std::lock_guard<std::mutex> lock(hookMutex);
     
-    if (isHooked) {
+    if (isInitialized) {
         return true;
     }
     
     // Get original function addresses
     HMODULE hKernel32 = GetModuleHandleW(L"kernel32.dll");
     if (!hKernel32) {
+        Logger::Log(LOG_ERROR, L"Failed to get kernel32.dll handle");
         return false;
     }
     
     OriginalCreateFileW = (CreateFileW_t)GetProcAddress(hKernel32, "CreateFileW");
     OriginalWriteFile = (WriteFile_t)GetProcAddress(hKernel32, "WriteFile");
-    OriginalCreateDirectoryW = (CreateDirectoryW_t)GetProcAddress(hKernel32, "CreateDirectoryW");
+    OriginalCopyFileW = (CopyFileW_t)GetProcAddress(hKernel32, "CopyFileW");
+    OriginalMoveFileW = (MoveFileW_t)GetProcAddress(hKernel32, "MoveFileW");
     
-    if (!OriginalCreateFileW || !OriginalWriteFile || !OriginalCreateDirectoryW) {
+    if (!OriginalCreateFileW || !OriginalWriteFile || !OriginalCopyFileW || !OriginalMoveFileW) {
+        Logger::Log(LOG_ERROR, L"Failed to get original API function addresses");
         return false;
     }
     
-    isHooked = true;
+    isInitialized = true;
     Logger::Log(LOG_INFO, L"API Hook initialized successfully");
     return true;
 }
@@ -46,131 +50,35 @@ bool APIHook::Initialize() {
 void APIHook::Shutdown() {
     std::lock_guard<std::mutex> lock(hookMutex);
     
-    // Unhook all processes
-    for (DWORD processId : hookedProcesses) {
-        UnhookProcess(processId);
+    if (!isInitialized) {
+        return;
     }
-    hookedProcesses.clear();
     
-    isHooked = false;
+    fileHandleMap.clear();
+    isInitialized = false;
     Logger::Log(LOG_INFO, L"API Hook shutdown");
 }
 
-bool APIHook::HookProcess(DWORD processId) {
-    std::lock_guard<std::mutex> lock(hookMutex);
-    
-    if (IsProcessHooked(processId)) {
-        return true;
-    }
-    
-    // For now, we'll implement a simpler approach using process monitoring
-    // In a full implementation, you would inject a DLL into the target process
-    hookedProcesses.push_back(processId);
-    
-    Logger::Log(LOG_INFO, L"Process hooked: " + std::to_wstring(processId));
-    return true;
+bool APIHook::IsFileBlocked(const std::wstring& filePath) {
+    return IsPDFFile(filePath) && IsUSBDrive(filePath);
 }
 
-void APIHook::UnhookProcess(DWORD processId) {
-    std::lock_guard<std::mutex> lock(hookMutex);
-    
-    auto it = std::find(hookedProcesses.begin(), hookedProcesses.end(), processId);
-    if (it != hookedProcesses.end()) {
-        hookedProcesses.erase(it);
-        Logger::Log(LOG_INFO, L"Process unhooked: " + std::to_wstring(processId));
-    }
-}
-
-bool APIHook::IsProcessHooked(DWORD processId) {
-    std::lock_guard<std::mutex> lock(hookMutex);
-    return std::find(hookedProcesses.begin(), hookedProcesses.end(), processId) != hookedProcesses.end();
-}
-
-// Hooked function implementations
-HANDLE WINAPI HookedCreateFileW(
-    LPCWSTR lpFileName,
-    DWORD dwDesiredAccess,
-    DWORD dwShareMode,
-    LPSECURITY_ATTRIBUTES lpSecurityAttributes,
-    DWORD dwCreationDisposition,
-    DWORD dwFlagsAndAttributes,
-    HANDLE hTemplateFile
-) {
-    if (lpFileName) {
-        std::wstring filePath(lpFileName);
-        
-        // Check if this is a PDF file being created/written to a USB drive
-        if (IsPDFFile(filePath) && IsUSBDrive(filePath)) {
-            // Block the operation
-            BlockFileOperation(filePath, L"CREATE");
-            SetLastError(ERROR_ACCESS_DENIED);
-            return INVALID_HANDLE_VALUE;
-        }
-    }
-    
-    // Call original function
-    return OriginalCreateFileW(lpFileName, dwDesiredAccess, dwShareMode, 
-        lpSecurityAttributes, dwCreationDisposition, dwFlagsAndAttributes, hTemplateFile);
-}
-
-BOOL WINAPI HookedWriteFile(
-    HANDLE hFile,
-    LPCVOID lpBuffer,
-    DWORD nNumberOfBytesToWrite,
-    LPDWORD lpNumberOfBytesWritten,
-    LPOVERLAPPED lpOverlapped
-) {
-    // Get the file path from the handle (simplified approach)
-    // In a real implementation, you would maintain a mapping of handles to file paths
-    
-    // For now, we'll use a different approach - monitor file operations at the system level
-    // This is a simplified implementation
-    
-    // Call original function
-    return OriginalWriteFile(hFile, lpBuffer, nNumberOfBytesToWrite, 
-        lpNumberOfBytesWritten, lpOverlapped);
-}
-
-BOOL WINAPI HookedCreateDirectoryW(
-    LPCWSTR lpPathName,
-    LPSECURITY_ATTRIBUTES lpSecurityAttributes
-) {
-    if (lpPathName) {
-        std::wstring dirPath(lpPathName);
-        
-        // Check if this is a directory being created on a USB drive
-        if (IsUSBDrive(dirPath)) {
-            // Allow directory creation but log it
-            Logger::Log(LOG_INFO, L"Directory creation on USB drive: " + dirPath);
-        }
-    }
-    
-    // Call original function
-    return OriginalCreateDirectoryW(lpPathName, lpSecurityAttributes);
-}
-
-// Helper functions
-bool IsPDFFile(const std::wstring& filePath) {
-    if (filePath.length() < 4) {
-        return false;
-    }
-    
-    std::wstring extension = filePath.substr(filePath.length() - 4);
-    std::transform(extension.begin(), extension.end(), extension.begin(), ::towlower);
-    
-    return extension == L".pdf";
-}
-
-bool IsUSBDrive(const std::wstring& filePath) {
-    return USBMonitor::IsUSBDrive(filePath);
-}
-
-void BlockFileOperation(const std::wstring& filePath, const std::wstring& operation) {
-    // Get current process information
+void APIHook::BlockFileOperation(const std::wstring& filePath, const std::wstring& operation) {
     DWORD processId = GetCurrentProcessId();
+    std::wstring processName = GetProcessName(processId);
+    
+    // Log the blocked operation
+    Logger::Log(LOG_WARNING, L"BLOCKED: " + operation + L" | Process: " + processName + 
+        L" (PID: " + std::to_wstring(processId) + L") | File: " + filePath);
+    
+    // Show alert dialog
+    std::wstring drivePath = filePath.substr(0, 2);
+    AlertDialog::ShowPDFBlockAlert(filePath, processName, drivePath);
+}
+
+std::wstring APIHook::GetProcessName(DWORD processId) {
     std::wstring processName = L"Unknown Process";
     
-    // Try to get process name
     HANDLE hProcess = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, processId);
     if (hProcess) {
         wchar_t processNameBuffer[MAX_PATH];
@@ -189,11 +97,130 @@ void BlockFileOperation(const std::wstring& filePath, const std::wstring& operat
         CloseHandle(hProcess);
     }
     
-    // Log the blocked operation
-    Logger::Log(LOG_WARNING, L"BLOCKED: " + operation + L" | Process: " + processName + 
-        L" (PID: " + std::to_wstring(processId) + L") | File: " + filePath);
-    
-    // Show alert dialog
-    std::wstring drivePath = filePath.substr(0, 2);
-    AlertDialog::ShowPDFBlockAlert(filePath, processName, drivePath);
+    return processName;
 }
+
+bool APIHook::IsPDFFile(const std::wstring& filePath) {
+    if (filePath.length() < 4) {
+        return false;
+    }
+    
+    std::wstring extension = filePath.substr(filePath.length() - 4);
+    std::transform(extension.begin(), extension.end(), extension.begin(), ::towlower);
+    
+    return extension == L".pdf";
+}
+
+bool APIHook::IsUSBDrive(const std::wstring& filePath) {
+    return USBMonitor::IsUSBDrive(filePath);
+}
+
+// Hooked function implementations
+HANDLE WINAPI HookedCreateFileW(
+    LPCWSTR lpFileName,
+    DWORD dwDesiredAccess,
+    DWORD dwShareMode,
+    LPSECURITY_ATTRIBUTES lpSecurityAttributes,
+    DWORD dwCreationDisposition,
+    DWORD dwFlagsAndAttributes,
+    HANDLE hTemplateFile
+) {
+    if (lpFileName) {
+        std::wstring filePath(lpFileName);
+        
+        // Check if this is a PDF file being created/written to a USB drive
+        if (APIHook::IsFileBlocked(filePath)) {
+            // Block the operation
+            APIHook::BlockFileOperation(filePath, L"CREATE_FILE");
+            SetLastError(ERROR_ACCESS_DENIED);
+            return INVALID_HANDLE_VALUE;
+        }
+    }
+    
+    // Call original function
+    HANDLE result = APIHook::OriginalCreateFileW(lpFileName, dwDesiredAccess, dwShareMode, 
+        lpSecurityAttributes, dwCreationDisposition, dwFlagsAndAttributes, hTemplateFile);
+    
+    // If successful and it's a file we want to monitor, track the handle
+    if (result != INVALID_HANDLE_VALUE && lpFileName) {
+        std::wstring filePath(lpFileName);
+        if (APIHook::IsPDFFile(filePath)) {
+            std::lock_guard<std::mutex> lock(APIHook::hookMutex);
+            APIHook::fileHandleMap[result] = filePath;
+        }
+    }
+    
+    return result;
+}
+
+BOOL WINAPI HookedWriteFile(
+    HANDLE hFile,
+    LPCVOID lpBuffer,
+    DWORD nNumberOfBytesToWrite,
+    LPDWORD lpNumberOfBytesWritten,
+    LPOVERLAPPED lpOverlapped
+) {
+    // Check if this handle is for a blocked file
+    std::wstring filePath;
+    {
+        std::lock_guard<std::mutex> lock(APIHook::hookMutex);
+        auto it = APIHook::fileHandleMap.find(hFile);
+        if (it != APIHook::fileHandleMap.end()) {
+            filePath = it->second;
+        }
+    }
+    
+    if (!filePath.empty() && APIHook::IsFileBlocked(filePath)) {
+        // Block the write operation
+        APIHook::BlockFileOperation(filePath, L"WRITE_FILE");
+        SetLastError(ERROR_ACCESS_DENIED);
+        return FALSE;
+    }
+    
+    // Call original function
+    return APIHook::OriginalWriteFile(hFile, lpBuffer, nNumberOfBytesToWrite, 
+        lpNumberOfBytesWritten, lpOverlapped);
+}
+
+BOOL WINAPI HookedCopyFileW(
+    LPCWSTR lpExistingFileName,
+    LPCWSTR lpNewFileName,
+    BOOL bFailIfExists
+) {
+    if (lpNewFileName) {
+        std::wstring filePath(lpNewFileName);
+        
+        // Check if this is a PDF file being copied to a USB drive
+        if (APIHook::IsFileBlocked(filePath)) {
+            // Block the operation
+            APIHook::BlockFileOperation(filePath, L"COPY_FILE");
+            SetLastError(ERROR_ACCESS_DENIED);
+            return FALSE;
+        }
+    }
+    
+    // Call original function
+    return APIHook::OriginalCopyFileW(lpExistingFileName, lpNewFileName, bFailIfExists);
+}
+
+BOOL WINAPI HookedMoveFileW(
+    LPCWSTR lpExistingFileName,
+    LPCWSTR lpNewFileName,
+    BOOL bFailIfExists
+) {
+    if (lpNewFileName) {
+        std::wstring filePath(lpNewFileName);
+        
+        // Check if this is a PDF file being moved to a USB drive
+        if (APIHook::IsFileBlocked(filePath)) {
+            // Block the operation
+            APIHook::BlockFileOperation(filePath, L"MOVE_FILE");
+            SetLastError(ERROR_ACCESS_DENIED);
+            return FALSE;
+        }
+    }
+    
+    // Call original function
+    return APIHook::OriginalMoveFileW(lpExistingFileName, lpNewFileName);
+}
+

@@ -5,12 +5,15 @@
 class FileMonitor {
 private:
     static std::vector<HANDLE> hChangeHandles;
+    static std::vector<std::wstring> drivePaths;
     static std::vector<std::wstring> monitoredDrives;
     static std::thread monitorThread;
     static bool isMonitoring;
     static std::mutex monitorMutex;
 
 public:
+    FileMonitor();
+    ~FileMonitor();
     static bool Initialize();
     static void Shutdown();
     static void StartMonitoring();

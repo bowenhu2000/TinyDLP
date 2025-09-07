@@ -1,8 +1,9 @@
-﻿#include "Common.h"
+#include "Common.h"
 #include "Logger.h"
 #include "USBMonitor.h"
 #include "FileMonitor.h"
 #include "AlertDialog.h"
+#include "DLLInjector.h"
 
 // Global variables
 HWND g_hWnd = NULL;
@@ -55,14 +56,22 @@ bool CreateHiddenWindow() {
         NULL
     );
     
-    if (!g_hWnd) {
-        return false;
+    return g_hWnd != NULL;
+}
+
+// Check if running as administrator
+bool IsRunningAsAdministrator() {
+    BOOL isAdmin = FALSE;
+    PSID adminGroup = NULL;
+    SID_IDENTIFIER_AUTHORITY ntAuthority = SECURITY_NT_AUTHORITY;
+    
+    if (AllocateAndInitializeSid(&ntAuthority, 2, SECURITY_BUILTIN_DOMAIN_RID,
+        DOMAIN_ALIAS_RID_ADMINS, 0, 0, 0, 0, 0, 0, &adminGroup)) {
+        CheckTokenMembership(NULL, adminGroup, &isAdmin);
+        FreeSid(adminGroup);
     }
     
-    // Hide the window
-    ShowWindow(g_hWnd, SW_HIDE);
-    
-    return true;
+    return isAdmin == TRUE;
 }
 
 // Initialize all components
@@ -91,11 +100,18 @@ bool InitializeComponents() {
         return false;
     }
     
+    // Initialize DLL injector
+    if (!DLLInjector::Initialize()) {
+        Logger::Log(LOG_ERROR, L"Failed to initialize DLL injector");
+        return false;
+    }
+    
     return true;
 }
 
 // Shutdown all components
 void ShutdownComponents() {
+    DLLInjector::Shutdown();
     FileMonitor::Shutdown();
     USBMonitor::Shutdown();
     Logger::Shutdown();
@@ -108,59 +124,30 @@ void ShutdownComponents() {
 
 // Main message loop
 void RunMessageLoop() {
-    MSG msg;
+    MSG msg = {};
     g_isRunning = true;
     
-    // Start monitoring
-    USBMonitor::StartMonitoring();
-    FileMonitor::StartMonitoring();
+    Logger::Log(LOG_INFO, L"TinyDLP started - monitoring processes and injecting DLL for PDF blocking");
     
-    Logger::Log(LOG_INFO, L"TinyDLP started successfully");
-    AlertDialog::ShowInfoAlert(L"TinyDLP", L"TinyDLP has started and is monitoring for PDF file saves to USB drives.");
+    // Start process monitoring and DLL injection
+    DLLInjector::StartProcessMonitoring();
     
-    while (g_isRunning) {
-        while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
-            if (msg.message == WM_QUIT) {
-                g_isRunning = false;
-                break;
-            }
-            
-            TranslateMessage(&msg);
-            DispatchMessage(&msg);
-        }
-        
-        // Small delay to prevent high CPU usage
-        Sleep(100);
+    while (g_isRunning && GetMessage(&msg, NULL, 0, 0)) {
+        TranslateMessage(&msg);
+        DispatchMessage(&msg);
     }
     
-    // Stop monitoring
-    FileMonitor::StopMonitoring();
-    USBMonitor::StopMonitoring();
-    
-    Logger::Log(LOG_INFO, L"TinyDLP stopped");
+    Logger::Log(LOG_INFO, L"TinyDLP shutting down");
 }
 
+// Main entry point
 int wmain(int argc, wchar_t* argv[]) {
     // Check if running as administrator
-    BOOL isAdmin = FALSE;
-    HANDLE hToken = NULL;
-    
-    if (OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &hToken)) {
-        TOKEN_ELEVATION elevation;
-        DWORD size;
-        
-        if (GetTokenInformation(hToken, TokenElevation, &elevation, sizeof(elevation), &size)) {
-            isAdmin = elevation.TokenIsElevated;
-        }
-        
-        CloseHandle(hToken);
-    }
-    
-    if (!isAdmin) {
+    if (!IsRunningAsAdministrator()) {
         MessageBoxW(NULL, 
-            L"TinyDLP requires administrator privileges to monitor file operations.\n"
-            L"Please run as administrator.",
-            L"TinyDLP - Administrator Required",
+            L"TinyDLP must be run as Administrator to monitor file operations.\n\n"
+            L"Please right-click on TinyDLP.exe and select 'Run as administrator'.",
+            L"Administrator Required", 
             MB_ICONWARNING | MB_OK);
         return 1;
     }
@@ -171,7 +158,7 @@ int wmain(int argc, wchar_t* argv[]) {
         return 1;
     }
     
-    // Run the application
+    // Run main message loop
     RunMessageLoop();
     
     // Shutdown components
@@ -179,3 +166,5 @@ int wmain(int argc, wchar_t* argv[]) {
     
     return 0;
 }
+
+
