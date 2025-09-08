@@ -1,14 +1,18 @@
-#include "TinyDLP_Hook.h"
+﻿#include "TinyDLP_Hook.h"
 #include <algorithm>
 #include <psapi.h>
 
 #pragma comment(lib, "psapi.lib")
+#pragma comment(lib, "detours.lib")
+#pragma comment(lib, "shlwapi.lib")
 
 // Global variables
 CreateFileW_t OriginalCreateFileW = nullptr;
 WriteFile_t OriginalWriteFile = nullptr;
 CopyFileW_t OriginalCopyFileW = nullptr;
 MoveFileW_t OriginalMoveFileW = nullptr;
+CopyFileExW_t OriginalCopyFileExW = nullptr;
+MoveFileExW_t OriginalMoveFileExW = nullptr;
 
 std::wofstream g_logFile;
 bool g_isHooked = false;
@@ -23,6 +27,9 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
     case DLL_PROCESS_ATTACH: {
         // Initialize critical section
         InitializeCriticalSection(&g_cs);
+        
+        // Ensure log directory exists
+        CreateDirectoryW(L"C:\\TinyDLP", NULL);
         
         // Open log file
         g_logFile.open(LOG_FILE_PATH, std::ios::app);
@@ -39,15 +46,14 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
         LogMessage(LOG_INFO, L"Target Process: " + processName);
         LogMessage(LOG_INFO, L"Process ID: " + std::to_wstring(processId));
         LogMessage(LOG_INFO, L"Injection Time: " + timestamp);
-        LogMessage(LOG_INFO, L"DLL Path: " + std::wstring(LOG_FILE_PATH));
         LogMessage(LOG_INFO, L"Ready to intercept file operations for PDF blocking");
         
-        // Install hooks
+        // Install hooks using Detours
         if (InstallHooks()) {
             g_isHooked = true;
-            LogMessage(LOG_INFO, L"Hooks installed successfully");
+            LogMessage(LOG_INFO, L"Detours hooks installed successfully - API interception is ACTIVE");
         } else {
-            LogMessage(LOG_ERROR, L"Failed to install hooks");
+            LogMessage(LOG_ERROR, L"Failed to install Detours hooks - API interception is NOT ACTIVE");
         }
         break;
     }
@@ -55,7 +61,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
     case DLL_PROCESS_DETACH: {
         if (g_isHooked) {
             UninstallHooks();
-            LogMessage(LOG_INFO, L"Hooks uninstalled");
+            LogMessage(LOG_INFO, L"Detours hooks uninstalled");
         }
         
         if (g_logFile.is_open()) {
@@ -70,26 +76,28 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
     return TRUE;
 }
 
-
-// Logging functions
 void LogMessage(LogLevel level, const std::wstring& message) {
-    if (!g_logFile.is_open()) return;
+    if (!g_logFile.is_open()) {
+        return;
+    }
     
     std::wstring timestamp = GetCurrentTimestamp();
     std::wstring levelStr;
     
     switch (level) {
-    case LOG_INFO: levelStr = L"INFO"; break;
-    case LOG_WARNING: levelStr = L"WARN"; break;
-    case LOG_ERROR: levelStr = L"ERROR"; break;
+    case LOG_INFO:
+        levelStr = L"INFO";
+        break;
+    case LOG_WARNING:
+        levelStr = L"WARNING";
+        break;
+    case LOG_ERROR:
+        levelStr = L"ERROR";
+        break;
     }
     
-    try {
-        g_logFile << L"[" << timestamp << L"] [" << levelStr << L"] " << message << std::endl;
-        g_logFile.flush();
-    } catch (const std::exception&) {
-        // If logging fails, continue silently
-    }
+    g_logFile << L"[" << timestamp << L"] [" << levelStr << L"] " << message << std::endl;
+    g_logFile.flush();
 }
 
 std::wstring GetCurrentTimestamp() {
@@ -99,13 +107,11 @@ std::wstring GetCurrentTimestamp() {
         now.time_since_epoch()) % 1000;
     
     std::wstringstream ss;
-    struct tm timeinfo;
-    if (localtime_s(&timeinfo, &time_t) == 0) {
-        ss << std::put_time(&timeinfo, L"%Y-%m-%d %H:%M:%S");
-    } else {
-        ss << L"1970-01-01 00:00:00";
-    }
+    std::tm timeinfo;
+    localtime_s(&timeinfo, &time_t);
+    ss << std::put_time(&timeinfo, L"%Y-%m-%d %H:%M:%S");
     ss << L"." << std::setfill(L'0') << std::setw(3) << ms.count();
+    
     return ss.str();
 }
 
@@ -117,7 +123,12 @@ bool IsPDFFile(const std::wstring& filePath) {
     std::wstring extension = filePath.substr(filePath.length() - 4);
     std::transform(extension.begin(), extension.end(), extension.begin(), ::towlower);
     
-    return extension == L".pdf";
+    bool isPdf = (extension == L".pdf");
+    if (isPdf) {
+        LogMessage(LOG_INFO, L"PDF file detected: " + filePath);
+    }
+    
+    return isPdf;
 }
 
 bool IsUSBDrive(const std::wstring& filePath) {
@@ -130,7 +141,11 @@ bool IsUSBDrive(const std::wstring& filePath) {
     
     // Check if it's a removable drive
     UINT driveType = GetDriveTypeW(drive.c_str());
-    return (driveType == DRIVE_REMOVABLE);
+    bool isRemovable = (driveType == DRIVE_REMOVABLE);
+    
+    LogMessage(LOG_INFO, L"Drive check for " + drive + L": Type=" + std::to_wstring(driveType) + L", IsRemovable=" + (isRemovable ? L"YES" : L"NO"));
+    
+    return isRemovable;
 }
 
 std::wstring GetProcessName() {
@@ -153,51 +168,142 @@ void BlockFileOperation(const std::wstring& filePath, const std::wstring& operat
     std::wstring processName = GetProcessName();
     DWORD processId = GetCurrentProcessId();
     
-    LogMessage(LOG_WARNING, L"BLOCKED: " + operation + L" | Process: " + processName + 
-        L" (PID: " + std::to_wstring(processId) + L") | File: " + filePath);
+    LogMessage(LOG_WARNING, L"=== PDF SAVE TO USB BLOCKED ===");
+    LogMessage(LOG_WARNING, L"Operation: " + operation);
+    LogMessage(LOG_WARNING, L"Process: " + processName + L" (PID: " + std::to_wstring(processId) + L")");
+    LogMessage(LOG_WARNING, L"File: " + filePath);
+    LogMessage(LOG_WARNING, L"Reason: PDF file save to USB drive blocked by TinyDLP");
     
     // Show message box to user
-    std::wstring message = L"TinyDLP has blocked an attempt to save a PDF file to a USB drive.\\n\\n";
-    message += L"Process: " + processName + L"\\n";
-    message += L"File: " + filePath + L"\\n";
+    std::wstring message = L"TinyDLP has blocked an attempt to save a PDF file to a USB drive.\n\n";
+    message += L"Process: " + processName + L"\n";
+    message += L"File: " + filePath + L"\n";
     message += L"Operation: " + operation;
     
-    MessageBoxW(NULL, message.c_str(), L"TinyDLP - PDF Save Blocked", 
+    MessageBoxW(NULL, message.c_str(), L"TinyDLP - PDF Save Blocked",
         MB_ICONWARNING | MB_OK | MB_TOPMOST);
 }
 
-// Hook installation functions
 bool InstallHooks() {
-    HMODULE hKernel32 = GetModuleHandleW(L"kernel32.dll");
-    if (!hKernel32) {
-        return false;
-    }
+    LogMessage(LOG_INFO, L"Starting Detours hook installation...");
+    
+    // Initialize Detours
+    DetourTransactionBegin();
+    DetourUpdateThread(GetCurrentThread());
     
     // Get original function addresses
-    OriginalCreateFileW = (CreateFileW_t)GetProcAddress(hKernel32, "CreateFileW");
-    OriginalWriteFile = (WriteFile_t)GetProcAddress(hKernel32, "WriteFile");
-    OriginalCopyFileW = (CopyFileW_t)GetProcAddress(hKernel32, "CopyFileW");
-    OriginalMoveFileW = (MoveFileW_t)GetProcAddress(hKernel32, "MoveFileW");
-    
-    if (!OriginalCreateFileW || !OriginalWriteFile || !OriginalCopyFileW || !OriginalMoveFileW) {
+    HMODULE hKernel32 = GetModuleHandleW(L"kernel32.dll");
+    if (!hKernel32) {
+        LogMessage(LOG_ERROR, L"Failed to get kernel32.dll module handle");
+        DetourTransactionAbort();
         return false;
     }
     
-    // For this implementation, we'll use a simple approach
-    // In a production system, you would use Microsoft Detours or similar library
-    // to properly hook the functions
+    // Hook CreateFileW
+    OriginalCreateFileW = (CreateFileW_t)GetProcAddress(hKernel32, "CreateFileW");
+    if (OriginalCreateFileW) {
+        DetourAttach(&(PVOID&)OriginalCreateFileW, HookedCreateFileW);
+        LogMessage(LOG_INFO, L"CreateFileW hook attached");
+    } else {
+        LogMessage(LOG_ERROR, L"Failed to get CreateFileW address");
+    }
     
-    return true;
+    // Hook WriteFile
+    OriginalWriteFile = (WriteFile_t)GetProcAddress(hKernel32, "WriteFile");
+    if (OriginalWriteFile) {
+        DetourAttach(&(PVOID&)OriginalWriteFile, HookedWriteFile);
+        LogMessage(LOG_INFO, L"WriteFile hook attached");
+    } else {
+        LogMessage(LOG_ERROR, L"Failed to get WriteFile address");
+    }
+    
+    // Hook CopyFileW
+    OriginalCopyFileW = (CopyFileW_t)GetProcAddress(hKernel32, "CopyFileW");
+    if (OriginalCopyFileW) {
+        DetourAttach(&(PVOID&)OriginalCopyFileW, HookedCopyFileW);
+        LogMessage(LOG_INFO, L"CopyFileW hook attached");
+    } else {
+        LogMessage(LOG_ERROR, L"Failed to get CopyFileW address");
+    }
+    
+    // Hook MoveFileW
+    OriginalMoveFileW = (MoveFileW_t)GetProcAddress(hKernel32, "MoveFileW");
+    if (OriginalMoveFileW) {
+        DetourAttach(&(PVOID&)OriginalMoveFileW, HookedMoveFileW);
+        LogMessage(LOG_INFO, L"MoveFileW hook attached");
+    } else {
+        LogMessage(LOG_ERROR, L"Failed to get MoveFileW address");
+    }
+    
+    // Hook CopyFileExW
+    OriginalCopyFileExW = (CopyFileExW_t)GetProcAddress(hKernel32, "CopyFileExW");
+    if (OriginalCopyFileExW) {
+        DetourAttach(&(PVOID&)OriginalCopyFileExW, HookedCopyFileExW);
+        LogMessage(LOG_INFO, L"CopyFileExW hook attached");
+    } else {
+        LogMessage(LOG_ERROR, L"Failed to get CopyFileExW address");
+    }
+    
+    // Hook MoveFileExW
+    OriginalMoveFileExW = (MoveFileExW_t)GetProcAddress(hKernel32, "MoveFileExW");
+    if (OriginalMoveFileExW) {
+        DetourAttach(&(PVOID&)OriginalMoveFileExW, HookedMoveFileExW);
+        LogMessage(LOG_INFO, L"MoveFileExW hook attached");
+    } else {
+        LogMessage(LOG_ERROR, L"Failed to get MoveFileExW address");
+    }
+    
+    // Commit the transaction
+    LONG result = DetourTransactionCommit();
+    if (result == NO_ERROR) {
+        LogMessage(LOG_INFO, L"All Detours hooks installed successfully - API interception is ACTIVE");
+        return true;
+    } else {
+        LogMessage(LOG_ERROR, L"Failed to commit Detours transaction. Error: " + std::to_wstring(result));
+        DetourTransactionAbort();
+        return false;
+    }
 }
 
 void UninstallHooks() {
+    LogMessage(LOG_INFO, L"Uninstalling Detours hooks...");
+    
+    // Begin transaction
+    DetourTransactionBegin();
+    DetourUpdateThread(GetCurrentThread());
+    
+    // Detach all hooks
+    if (OriginalCreateFileW) {
+        DetourDetach(&(PVOID&)OriginalCreateFileW, HookedCreateFileW);
+    }
+    if (OriginalWriteFile) {
+        DetourDetach(&(PVOID&)OriginalWriteFile, HookedWriteFile);
+    }
+    if (OriginalCopyFileW) {
+        DetourDetach(&(PVOID&)OriginalCopyFileW, HookedCopyFileW);
+    }
+    if (OriginalMoveFileW) {
+        DetourDetach(&(PVOID&)OriginalMoveFileW, HookedMoveFileW);
+    }
+    if (OriginalCopyFileExW) {
+        DetourDetach(&(PVOID&)OriginalCopyFileExW, HookedCopyFileExW);
+    }
+    if (OriginalMoveFileExW) {
+        DetourDetach(&(PVOID&)OriginalMoveFileExW, HookedMoveFileExW);
+    }
+    
+    // Commit the transaction
+    DetourTransactionCommit();
+    
     // Clean up any resources
     EnterCriticalSection(&g_cs);
     g_fileHandleMap.clear();
     LeaveCriticalSection(&g_cs);
+    
+    LogMessage(LOG_INFO, L"Detours hooks uninstalled");
 }
 
-// Hooked function implementations
+// Hooked Functions Implementation
 HANDLE WINAPI HookedCreateFileW(
     LPCWSTR lpFileName,
     DWORD dwDesiredAccess,
@@ -210,9 +316,13 @@ HANDLE WINAPI HookedCreateFileW(
     if (lpFileName) {
         std::wstring filePath(lpFileName);
         
-        // Check if this is a PDF file being created/written to a USB drive
+        // Log all file operations (not just those with extensions)
+        LogMessage(LOG_INFO, L"CreateFileW called for: " + filePath);
+        LogMessage(LOG_INFO, L"  Access: 0x" + std::to_wstring(dwDesiredAccess) + L", Disposition: " + std::to_wstring(dwCreationDisposition));
+        
+        // Check if this is a PDF file being created on a USB drive
         if (IsPDFFile(filePath) && IsUSBDrive(filePath)) {
-            // Block the operation
+            LogMessage(LOG_WARNING, L"PDF file creation attempt detected on USB drive: " + filePath);
             BlockFileOperation(filePath, L"CREATE_FILE");
             SetLastError(ERROR_ACCESS_DENIED);
             return INVALID_HANDLE_VALUE;
@@ -230,6 +340,7 @@ HANDLE WINAPI HookedCreateFileW(
             EnterCriticalSection(&g_cs);
             g_fileHandleMap[result] = filePath;
             LeaveCriticalSection(&g_cs);
+            LogMessage(LOG_INFO, L"Tracking handle for PDF file: " + filePath);
         }
     }
     
@@ -252,11 +363,15 @@ BOOL WINAPI HookedWriteFile(
     }
     LeaveCriticalSection(&g_cs);
     
-    if (!filePath.empty() && IsPDFFile(filePath) && IsUSBDrive(filePath)) {
-        // Block the write operation
-        BlockFileOperation(filePath, L"WRITE_FILE");
-        SetLastError(ERROR_ACCESS_DENIED);
-        return FALSE;
+    if (!filePath.empty()) {
+        LogMessage(LOG_INFO, L"WriteFile called for tracked file: " + filePath + L", Bytes: " + std::to_wstring(nNumberOfBytesToWrite));
+        
+        if (IsPDFFile(filePath) && IsUSBDrive(filePath)) {
+            LogMessage(LOG_WARNING, L"PDF file write attempt detected on USB drive: " + filePath);
+            BlockFileOperation(filePath, L"WRITE_FILE");
+            SetLastError(ERROR_ACCESS_DENIED);
+            return FALSE;
+        }
     }
     
     // Call original function
@@ -271,10 +386,15 @@ BOOL WINAPI HookedCopyFileW(
 ) {
     if (lpNewFileName) {
         std::wstring filePath(lpNewFileName);
+        std::wstring sourcePath = lpExistingFileName ? std::wstring(lpExistingFileName) : L"<unknown>";
         
-        // Check if this is a PDF file being copied to a USB drive
+        LogMessage(LOG_INFO, L"CopyFileW called:");
+        LogMessage(LOG_INFO, L"  Source: " + sourcePath);
+        LogMessage(LOG_INFO, L"  Target: " + filePath);
+        LogMessage(LOG_INFO, L"  FailIfExists: " + (bFailIfExists) ? L"TRUE" : L"FALSE");
+        
         if (IsPDFFile(filePath) && IsUSBDrive(filePath)) {
-            // Block the operation
+            LogMessage(LOG_WARNING, L"PDF file copy attempt detected on USB drive: " + filePath);
             BlockFileOperation(filePath, L"COPY_FILE");
             SetLastError(ERROR_ACCESS_DENIED);
             return FALSE;
@@ -291,10 +411,14 @@ BOOL WINAPI HookedMoveFileW(
 ) {
     if (lpNewFileName) {
         std::wstring filePath(lpNewFileName);
+        std::wstring sourcePath = lpExistingFileName ? std::wstring(lpExistingFileName) : L"<unknown>";
         
-        // Check if this is a PDF file being moved to a USB drive
+        LogMessage(LOG_INFO, L"MoveFileW called:");
+        LogMessage(LOG_INFO, L"  Source: " + sourcePath);
+        LogMessage(LOG_INFO, L"  Target: " + filePath);
+        
         if (IsPDFFile(filePath) && IsUSBDrive(filePath)) {
-            // Block the operation
+            LogMessage(LOG_WARNING, L"PDF file move attempt detected on USB drive: " + filePath);
             BlockFileOperation(filePath, L"MOVE_FILE");
             SetLastError(ERROR_ACCESS_DENIED);
             return FALSE;
@@ -305,6 +429,57 @@ BOOL WINAPI HookedMoveFileW(
     return OriginalMoveFileW(lpExistingFileName, lpNewFileName);
 }
 
+BOOL WINAPI HookedCopyFileExW(
+    LPCWSTR lpExistingFileName,
+    LPCWSTR lpNewFileName,
+    LPPROGRESS_ROUTINE lpProgressRoutine,
+    LPVOID lpData,
+    LPBOOL pbCancel,
+    DWORD dwCopyFlags
+) {
+    if (lpNewFileName) {
+        std::wstring filePath(lpNewFileName);
+        std::wstring sourcePath = lpExistingFileName ? std::wstring(lpExistingFileName) : L"<unknown>";
+        
+        LogMessage(LOG_INFO, L"CopyFileExW called:");
+        LogMessage(LOG_INFO, L"  Source: " + sourcePath);
+        LogMessage(LOG_INFO, L"  Target: " + filePath);
+        LogMessage(LOG_INFO, L"  CopyFlags: 0x" + std::to_wstring(dwCopyFlags));
+        
+        if (IsPDFFile(filePath) && IsUSBDrive(filePath)) {
+            LogMessage(LOG_WARNING, L"PDF file copy (Ex) attempt detected on USB drive: " + filePath);
+            BlockFileOperation(filePath, L"COPY_FILE_EX");
+            SetLastError(ERROR_ACCESS_DENIED);
+            return FALSE;
+        }
+    }
+    
+    // Call original function
+    return OriginalCopyFileExW(lpExistingFileName, lpNewFileName, lpProgressRoutine, lpData, pbCancel, dwCopyFlags);
+}
 
-
-
+BOOL WINAPI HookedMoveFileExW(
+    LPCWSTR lpExistingFileName,
+    LPCWSTR lpNewFileName,
+    DWORD dwFlags
+) {
+    if (lpNewFileName) {
+        std::wstring filePath(lpNewFileName);
+        std::wstring sourcePath = lpExistingFileName ? std::wstring(lpExistingFileName) : L"<unknown>";
+        
+        LogMessage(LOG_INFO, L"MoveFileExW called:");
+        LogMessage(LOG_INFO, L"  Source: " + sourcePath);
+        LogMessage(LOG_INFO, L"  Target: " + filePath);
+        LogMessage(LOG_INFO, L"  Flags: 0x" + std::to_wstring(dwFlags));
+        
+        if (IsPDFFile(filePath) && IsUSBDrive(filePath)) {
+            LogMessage(LOG_WARNING, L"PDF file move (Ex) attempt detected on USB drive: " + filePath);
+            BlockFileOperation(filePath, L"MOVE_FILE_EX");
+            SetLastError(ERROR_ACCESS_DENIED);
+            return FALSE;
+        }
+    }
+    
+    // Call original function
+    return OriginalMoveFileExW(lpExistingFileName, lpNewFileName, dwFlags);
+}
