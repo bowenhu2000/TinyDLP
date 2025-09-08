@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "Common.h"
 #include <tlhelp32.h>
@@ -25,6 +25,7 @@ public:
     
 private:
     static void ProcessMonitorThread();
+    static void InjectIntoExistingProcesses();
     static bool ShouldInjectProcess(const std::wstring& processName);
     static std::vector<DWORD> GetRunningProcesses();
     static std::wstring GetProcessName(DWORD processId);
@@ -32,7 +33,3 @@ private:
     static void OnProcessCreated(DWORD processId);
     static void OnProcessTerminated(DWORD processId);
 };
-
-
-
-
