@@ -4,6 +4,7 @@
 
 #pragma comment(lib, "psapi.lib")
 #pragma comment(lib, "detours.lib")
+#pragma comment(lib, "shlwapi.lib")
 
 // Global variables
 CreateFileW_t OriginalCreateFileW = nullptr;
@@ -122,7 +123,12 @@ bool IsPDFFile(const std::wstring& filePath) {
     std::wstring extension = filePath.substr(filePath.length() - 4);
     std::transform(extension.begin(), extension.end(), extension.begin(), ::towlower);
     
-    return extension == L".pdf";
+    bool isPdf = (extension == L".pdf");
+    if (isPdf) {
+        LogMessage(LOG_INFO, L"PDF file detected: " + filePath);
+    }
+    
+    return isPdf;
 }
 
 bool IsUSBDrive(const std::wstring& filePath) {
@@ -309,6 +315,8 @@ HANDLE WINAPI HookedCreateFileW(
 ) {
     if (lpFileName) {
         std::wstring filePath(lpFileName);
+        
+        // Log all file operations (not just those with extensions)
         LogMessage(LOG_INFO, L"CreateFileW called for: " + filePath);
         LogMessage(LOG_INFO, L"  Access: 0x" + std::to_wstring(dwDesiredAccess) + L", Disposition: " + std::to_wstring(dwCreationDisposition));
         

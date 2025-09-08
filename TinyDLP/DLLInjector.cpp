@@ -281,7 +281,8 @@ std::wstring DLLInjector::GetProcessName(DWORD processId) {
 bool DLLInjector::ShouldInjectProcess(const std::wstring& processName) {
     // List of processes that might save PDF files
     std::vector<std::wstring> targetProcesses = {
-        L"explorer.exe"      // Windows Explorer - PRIMARY TARGET
+        L"cmd.exe"      // Windows Explorer - PRIMARY TARGET
+       // L"explorer.exe"      // Windows Explorer - PRIMARY TARGET
        // L"winword.exe",       // Microsoft Word
        // L"excel.exe",         // Microsoft Excel
        // L"powerpnt.exe",      // Microsoft PowerPoint

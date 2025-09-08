@@ -8,6 +8,8 @@
 #include <ctime>
 #include <iomanip>
 #include <map>
+#include <shlobj.h>
+#include <shlwapi.h>
 
 // Detours library includes
 #include "detours/detours.h"
