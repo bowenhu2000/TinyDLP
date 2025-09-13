@@ -136,7 +136,7 @@ void SystemTray::ShowAboutDialog() {
         L"Data Loss Prevention Tool\n"
         L"Monitors file operations and USB devices\n"
         L"to prevent unauthorized data exfiltration.\n\n"
-        L" 2024 TinyDLP",
+        L" 2025 TinyDLP",
         L"About TinyDLP",
         MB_OK | MB_ICONINFORMATION);
 }

@@ -1,4 +1,4 @@
-﻿# TinyDLP - Data Loss Prevention System
+# TinyDLP - Data Loss Prevention System
 
 A lightweight Data Loss Prevention (DLP) system that blocks PDF file transfers to USB drives using API hooking technology.
 
@@ -10,6 +10,7 @@ A lightweight Data Loss Prevention (DLP) system that blocks PDF file transfers t
 - **Comprehensive Logging**: Detailed logging of all file operations and blocking attempts
 - **Command Line Support**: Blocks PDF transfers via command line tools (cmd.exe, PowerShell)
 - **Real-time Monitoring**: Continuous process monitoring and automatic hook injection
+- **GUI Interface**: Modern system tray interface with real-time log viewer
 
 ##  How It Works
 
@@ -47,16 +48,24 @@ build_hook_dll.bat
 ### 3. Run as Administrator
 ```bash
 # Start TinyDLP (must run as Administrator)
-TinyDLP\x64\Debug\TinyDLP.exe
+TinyDLP\x64\Release\TinyDLP.exe
 ```
 
 ##  Usage
+
+### GUI Interface
+1. **Start TinyDLP** as Administrator
+2. **Look for the system tray icon** in the bottom-right corner
+3. **Right-click the icon** to access the context menu:
+   - **About**: View application information
+   - **Logs**: Open real-time log viewer
+   - **Exit**: Close the application
 
 ### Basic Usage
 1. **Start TinyDLP** as Administrator
 2. **Connect a USB drive** (e.g., K: drive)
 3. **Try copying a PDF file** to the USB drive
-4. **Check the logs** at `C:\TinyDLP\TinyDLP_Hook.log`
+4. **View logs** using the system tray menu
 
 ### Testing
 ```bash
@@ -68,13 +77,11 @@ copy test.pdf K:\test.pdf
 ```
 
 ### Log Monitoring
-```bash
-# View real-time logs
-Get-Content "C:\TinyDLP\TinyDLP_Hook.log" -Wait
-
-# View recent logs
-Get-Content "C:\TinyDLP\TinyDLP_Hook.log" -Tail 50
-```
+The GUI provides real-time log viewing:
+- Right-click the system tray icon
+- Select "Logs" to open the log viewer
+- View real-time updates as events occur
+- Auto-scrolls to show the latest entries
 
 ##  Project Structure
 
@@ -82,6 +89,7 @@ Get-Content "C:\TinyDLP\TinyDLP_Hook.log" -Tail 50
 TinyDLP/
  TinyDLP/                    # Main application
     main.cpp               # Application entry point
+    SystemTray.h/.cpp      # System tray functionality
     DLLInjector.cpp        # DLL injection logic
     Logger.cpp             # Logging system
     TinyDLP.vcxproj        # Main project file
@@ -93,6 +101,7 @@ TinyDLP/
  build.bat                  # Main build script
  build_hook_dll.bat         # Hook DLL build script
  test_cmd_copy.bat          # Testing script
+ test_gui.bat               # GUI testing script
 ```
 
 ##  Supported Operations
@@ -108,16 +117,16 @@ TinyDLP/
 
 ##  Logging
 
-The system provides comprehensive logging:
+The system provides comprehensive logging with real-time GUI display:
 
 ```
-[2025-09-07 17:13:58.112] [INFO] === TinyDLP Hook DLL Successfully Injected ===
-[2025-09-07 17:13:58.112] [INFO] Target Process: cmd.exe
-[2025-09-07 17:13:58.112] [INFO] Process ID: 2844
-[2025-09-07 17:13:58.113] [INFO] All Detours hooks installed successfully
-[2025-09-07 17:13:58.114] [WARNING] === PDF SAVE TO USB BLOCKED ===
-[2025-09-07 17:13:58.114] [WARNING] File: K:\test.pdf
-[2025-09-07 17:13:58.114] [WARNING] Reason: PDF file save to USB drive blocked by TinyDLP
+[2025-09-12 22:35:58.112] [INFO] === TinyDLP Hook DLL Successfully Injected ===
+[2025-09-12 22:35:58.112] [INFO] Target Process: cmd.exe
+[2025-09-12 22:35:58.112] [INFO] Process ID: 2844
+[2025-09-12 22:35:58.113] [INFO] All Detours hooks installed successfully
+[2025-09-12 22:35:58.114] [WARNING] === PDF SAVE TO USB BLOCKED ===
+[2025-09-12 22:35:58.114] [WARNING] File: K:\test.pdf
+[2025-09-12 22:35:58.114] [WARNING] Reason: PDF file save to USB drive blocked by TinyDLP
 ```
 
 ##  Configuration
@@ -144,10 +153,10 @@ Blocks operations to:
 ### Building from Source
 ```bash
 # Build main application
-msbuild TinyDLP.sln /p:Configuration=Debug /p:Platform=x64
+msbuild TinyDLP.sln /p:Configuration=Release /p:Platform=x64
 
 # Build hook DLL only
-msbuild TinyDLP\TinyDLP_Hook\TinyDLP_Hook.vcxproj /p:Configuration=Debug /p:Platform=x64
+msbuild TinyDLP\TinyDLP_Hook\TinyDLP_Hook.vcxproj /p:Configuration=Release /p:Platform=x64
 ```
 
 ### Adding New File Types
@@ -195,6 +204,11 @@ bool DLLInjector::ShouldInjectProcess(const std::wstring& processName) {
 - Check file permissions
 - Verify the hook DLL is properly injected
 
+**4. System Tray Icon Not Visible**
+- Check if the icon is hidden in the system tray
+- Right-click the taskbar and select "Taskbar settings"
+- Look for "Select which icons appear on the taskbar"
+
 ### Debug Mode
 Enable detailed logging by setting the log level in the code:
 
@@ -221,12 +235,14 @@ If you encounter any issues or have questions:
 
 1. Check the [Issues](https://github.com/yourusername/TinyDLP/issues) page
 2. Create a new issue with detailed information
-3. Include logs from `C:\TinyDLP\TinyDLP_Hook.log`
+3. Include logs from the real-time log viewer
 
 ##  Future Enhancements
 
+- [x] GUI interface with system tray
+- [x] Real-time log viewer
 - [ ] Windows Explorer support (IFileOperation hooks)
-- [ ] GUI interface for configuration
+- [ ] Configuration interface
 - [ ] Support for additional file types
 - [ ] Network drive blocking
 - [ ] Email attachment blocking
@@ -248,3 +264,5 @@ This software is for educational and research purposes. Users are responsible fo
 ---
 
 **Made with  for data protection and security research**
+
+ 2025 TinyDLP
