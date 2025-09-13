@@ -1,8 +1,9 @@
-#include "Logger.h"
+﻿#include "Logger.h"
 
 std::mutex Logger::logMutex;
 std::wofstream Logger::logFile;
 bool Logger::isInitialized = false;
+void (*Logger::OnLogMessage)(const std::wstring& message) = nullptr;
 
 bool Logger::Initialize() {
     std::lock_guard<std::mutex> lock(logMutex);
@@ -45,9 +46,15 @@ void Logger::Log(LogLevel level, const std::wstring& message) {
     
     std::wstring timestamp = GetCurrentTimestamp();
     std::wstring levelStr = LogLevelToString(level);
+    std::wstring fullMessage = L"[" + timestamp + L"] [" + levelStr + L"] " + message;
     
-    logFile << L"[" << timestamp << L"] [" << levelStr << L"] " << message << std::endl;
+    logFile << fullMessage << std::endl;
     logFile.flush();
+    
+    // Notify system tray if callback is set
+    if (OnLogMessage) {
+        OnLogMessage(fullMessage);
+    }
 }
 
 void Logger::LogFileOperation(const FileOperationInfo& fileOp) {

@@ -16,4 +16,7 @@ public:
     static void LogUSBEvent(const std::wstring& event, const USBDeviceInfo& device);
     static std::wstring GetCurrentTimestamp();
     static std::wstring LogLevelToString(LogLevel level);
+    
+    // Callback for system tray integration
+    static void (*OnLogMessage)(const std::wstring& message);
 };

@@ -1,9 +1,10 @@
-#include "Common.h"
+﻿#include "Common.h"
 #include "Logger.h"
 #include "USBMonitor.h"
 #include "FileMonitor.h"
 #include "AlertDialog.h"
 #include "DLLInjector.h"
+#include "SystemTray.h"
 
 // Global variables
 HWND g_hWnd = NULL;
@@ -28,6 +29,10 @@ LRESULT CALLBACK WindowProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
             return 0;
             
         default:
+            // Handle system tray messages
+            if (SystemTray::HandleTrayMessage(hWnd, uMsg, wParam, lParam)) {
+                return 0;
+            }
             return DefWindowProc(hWnd, uMsg, wParam, lParam);
     }
 }
@@ -88,6 +93,15 @@ bool InitializeComponents() {
         return false;
     }
     
+    // Initialize system tray
+    if (!SystemTray::Initialize(g_hWnd)) {
+        Logger::Log(LOG_ERROR, L"Failed to initialize system tray");
+        return false;
+    }
+    
+    // Set up logger callback for system tray
+    Logger::OnLogMessage = SystemTray::AddLogMessage;
+    
     // Initialize USB monitor
     if (!USBMonitor::Initialize(g_hWnd)) {
         Logger::Log(LOG_ERROR, L"Failed to initialize USB monitor");
@@ -114,6 +128,7 @@ void ShutdownComponents() {
     DLLInjector::Shutdown();
     FileMonitor::Shutdown();
     USBMonitor::Shutdown();
+    SystemTray::Shutdown();
     Logger::Shutdown();
     
     if (g_hWnd) {
@@ -129,6 +144,9 @@ void RunMessageLoop() {
     
     Logger::Log(LOG_INFO, L"TinyDLP started - monitoring processes and injecting DLL for PDF blocking");
     
+    // Show system tray icon
+    SystemTray::ShowTrayIcon();
+    
     // Start process monitoring and DLL injection
     DLLInjector::StartProcessMonitoring();
     
@@ -141,7 +159,7 @@ void RunMessageLoop() {
 }
 
 // Main entry point
-int wmain(int argc, wchar_t* argv[]) {
+int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
     // Check if running as administrator
     if (!IsRunningAsAdministrator()) {
         MessageBoxW(NULL, 
@@ -166,5 +184,3 @@ int wmain(int argc, wchar_t* argv[]) {
     
     return 0;
 }
-
-
