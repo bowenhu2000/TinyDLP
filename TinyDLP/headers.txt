@@ -1,0 +1,7 @@
+﻿#include "HttpClient.h"
+#include "Logger.h"
+#include <curl/curl.h>
+#include <sstream>
+#include <fstream>
+#include <algorithm>
+#include <cctype>
