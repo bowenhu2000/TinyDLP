@@ -2,7 +2,7 @@
 
 ## Overview
 
-TinyDLP is a Data Loss Prevention (DLP) application that monitors and blocks attempts to save PDF files to USB drives. This implementation uses **DLL Injection with API Hooking** to intercept file operations at the system level, providing real-time blocking of PDF save operations.
+TinyDLP is a Data Loss Prevention (DLP) application that monitors and blocks attempts to save sensitive files to USB drives. This implementation uses **DLL Injection with API Hooking** to intercept file operations at the system level, providing real-time blocking of file save operations.
 
 ## Architecture
 
@@ -16,7 +16,7 @@ TinyDLP is a Data Loss Prevention (DLP) application that monitors and blocks att
 2. **Hook DLL (TinyDLP_Hook.dll)**
    - Injected into target processes
    - Intercepts Windows API calls
-   - Blocks PDF operations on USB drives
+   - Blocks file operations on USB drives
 
 ### API Hooking Mechanism
 
@@ -29,10 +29,10 @@ The system intercepts the following Windows API functions:
 ## How It Works
 
 1. **Process Monitoring**: Main application continuously monitors running processes
-2. **Target Detection**: Identifies processes that might save PDF files (Office apps, browsers, etc.)
+2. **Target Detection**: Identifies processes that might save files (Office apps, browsers, etc.)
 3. **DLL Injection**: Injects `TinyDLP_Hook.dll` into target processes using `CreateRemoteThread`
 4. **API Interception**: DLL hooks the file operation APIs in the target process
-5. **Real-time Blocking**: When a PDF file operation to USB drive is detected, it's blocked immediately
+5. **Real-time Blocking**: When a file operation to USB drive is detected, it's blocked immediately
 6. **User Notification**: Shows alert dialog and logs the blocked operation
 
 ## Target Processes
@@ -78,9 +78,9 @@ The system monitors and injects into these types of applications:
    ```
 
 2. **Test scenarios**:
-   - Open Microsoft Word and try to save a PDF to a USB drive
-   - Use a web browser to download a PDF to a USB drive
-   - Copy a PDF file to a USB drive using Windows Explorer
+   - Open Microsoft Word and try to save a file to a USB drive
+   - Use a web browser to download a file to a USB drive
+   - Copy a file to a USB drive using Windows Explorer
 
 ## Logging
 
@@ -98,7 +98,7 @@ The system monitors and injects into these types of applications:
 
 ### Log Format
 ```
-[2024-01-15 14:30:25.123] [WARN] BLOCKED: CREATE_FILE | Process: winword.exe (PID: 1234) | File: E:\document.pdf
+[2024-01-15 14:30:25.123] [WARN] BLOCKED: CREATE_FILE | Process: winword.exe (PID: 1234) | File: E:\\document.docx
 ```
 
 ## Technical Implementation
@@ -116,7 +116,7 @@ The system monitors and injects into these types of applications:
 The hook DLL uses function pointer redirection:
 - Saves original function addresses
 - Replaces function calls with hooked versions
-- Checks file paths for PDF files on USB drives
+- Checks file paths for files on USB drives
 - Blocks operations and shows user alerts
 
 ### USB Drive Detection

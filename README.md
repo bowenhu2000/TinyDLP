@@ -1,14 +1,14 @@
 # TinyDLP - Data Loss Prevention System
 
-A lightweight Data Loss Prevention (DLP) system that blocks PDF file transfers to USB drives using API hooking technology.
+A lightweight Data Loss Prevention (DLP) system that blocks unauthorized file transfers to USB drives using API hooking technology.
 
 ##  Features
 
-- **PDF File Blocking**: Prevents PDF files from being copied to USB drives
+- **File Blocking**: Prevents sensitive files from being copied to USB drives
 - **API Hooking**: Uses Microsoft Detours library for low-level API interception
 - **Process Injection**: Automatically injects hooks into target processes
 - **Comprehensive Logging**: Detailed logging of all file operations and blocking attempts
-- **Command Line Support**: Blocks PDF transfers via command line tools (cmd.exe, PowerShell)
+- **Command Line Support**: Blocks file transfers via command line tools (cmd.exe, PowerShell)
 - **Real-time Monitoring**: Continuous process monitoring and automatic hook injection
 - **GUI Interface**: Modern system tray interface with real-time log viewer
 
@@ -18,8 +18,8 @@ TinyDLP uses API hooking to intercept Windows file operations:
 
 1. **DLL Injection**: Injects a hook DLL into target processes
 2. **API Interception**: Hooks critical file APIs (CreateFileW, CopyFileW, WriteFile, etc.)
-3. **File Analysis**: Analyzes file paths to detect PDF files and USB drives
-4. **Blocking**: Prevents PDF file operations to USB drives with user notification
+3. **File Analysis**: Analyzes file paths to detect sensitive files and USB drives
+4. **Blocking**: Prevents file operations to USB drives with user notification
 
 ##  Requirements
 
@@ -64,16 +64,16 @@ TinyDLP\x64\Release\TinyDLP.exe
 ### Basic Usage
 1. **Start TinyDLP** as Administrator
 2. **Connect a USB drive** (e.g., K: drive)
-3. **Try copying a PDF file** to the USB drive
+3. **Try copying a file** to the USB drive
 4. **View logs** using the system tray menu
 
 ### Testing
 ```bash
-# Create a test PDF file
-echo test content > test.pdf
+# Create a test file
+echo test content > test.txt
 
 # Try to copy to USB drive (will be blocked)
-copy test.pdf K:\test.pdf
+copy test.txt K:\test.txt
 ```
 
 ### Log Monitoring
@@ -124,9 +124,9 @@ The system provides comprehensive logging with real-time GUI display:
 [2025-09-12 22:35:58.112] [INFO] Target Process: cmd.exe
 [2025-09-12 22:35:58.112] [INFO] Process ID: 2844
 [2025-09-12 22:35:58.113] [INFO] All Detours hooks installed successfully
-[2025-09-12 22:35:58.114] [WARNING] === PDF SAVE TO USB BLOCKED ===
-[2025-09-12 22:35:58.114] [WARNING] File: K:\test.pdf
-[2025-09-12 22:35:58.114] [WARNING] Reason: PDF file save to USB drive blocked by TinyDLP
+[2025-09-12 22:35:58.114] [WARNING] === FILE SAVE TO USB BLOCKED ===
+[2025-09-12 22:35:58.114] [WARNING] File: K:\test.txt
+[2025-09-12 22:35:58.114] [WARNING] Reason: File save to USB drive blocked by TinyDLP
 ```
 
 ##  Configuration
@@ -142,7 +142,7 @@ The system automatically injects hooks into:
 
 ### File Types
 Currently blocks:
-- **PDF files** (`.pdf` extension)
+- **Configurable file types** (`.pdf` extension)
 
 ### Drive Types
 Blocks operations to:
@@ -160,15 +160,15 @@ msbuild TinyDLP\TinyDLP_Hook\TinyDLP_Hook.vcxproj /p:Configuration=Release /p:Pl
 ```
 
 ### Adding New File Types
-Edit `TinyDLP_Hook.cpp` and modify the `IsPDFFile` function:
+Edit `TinyDLP_Hook.cpp` and modify the `IsBlockedFile` function:
 
 ```cpp
-bool IsPDFFile(const std::wstring& filePath) {
+bool IsBlockedFile(const std::wstring& filePath) {
     // Add support for other file types
     if (filePath.ends_with(L".docx") || filePath.ends_with(L".xlsx")) {
         return true;
     }
-    // ... existing PDF logic
+    // ... existing file blocking logic
 }
 ```
 
@@ -194,7 +194,7 @@ bool DLLInjector::ShouldInjectProcess(const std::wstring& processName) {
 - Check if antivirus is blocking the injection
 - Verify the hook DLL exists at the correct path
 
-**2. PDF Copy Not Blocked**
+**2. File Copy Not Blocked**
 - Check if the operation is using Windows Explorer (not supported yet)
 - Verify the file has `.pdf` extension
 - Check if the target drive is detected as removable
