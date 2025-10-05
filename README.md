@@ -229,14 +229,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 4. Push to the branch (`git push origin feature/amazing-feature`)
 5. Open a Pull Request
 
-##  Support
-
-If you encounter any issues or have questions:
-
-1. Check the [Issues](https://github.com/yourusername/TinyDLP/issues) page
-2. Create a new issue with detailed information
-3. Include logs from the real-time log viewer
-
 ##  Future Enhancements
 
 - [x] GUI interface with system tray
