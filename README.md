@@ -217,9 +217,6 @@ Enable detailed logging by setting the log level in the code:
 LogMessage(LOG_INFO, L"Detailed debug information");
 ```
 
-##  License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ##  Contributing
 
@@ -242,10 +239,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - [ ] Configuration file support
 - [ ] Real-time notifications
 - [ ] Statistics and reporting
-
-##  Disclaimer
-
-This software is for educational and research purposes. Users are responsible for complying with applicable laws and regulations. The authors are not responsible for any misuse of this software.
 
 ##  Acknowledgments
 
